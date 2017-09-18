@@ -149,7 +149,7 @@
             this.parameterControl.TabIndex = 15;
             this.parameterControl.TabStop = false;
             this.parameterControl.Text = "Generate Settings";
-            this.parameterControl.Enter += new System.EventHandler(this.parameterControl_Enter);
+            //this.parameterControl.Enter += new System.EventHandler(this.parameterControl_Enter);
             // 
             // decimalNumbers
             // 

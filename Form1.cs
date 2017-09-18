@@ -21,7 +21,7 @@ namespace Math_Problem_Generator_C_Sharp
             iterationValue.Maximum = int.MaxValue / 4; //Capped the iterationValue at the 1/4th of the integer Maximum Value. 
         }
 
-        MathFunctions.MathParser mp = new MathFunctions.MathParser(); //NgeInitialize Math Parser
+        //MathFunctions.MathParser mp = new MathFunctions.MathParser(); //NgeInitialize Math Parser
 
         StringBuilder sb = new StringBuilder(); // Ngeitialize StringBuilder buat naruh string Question ama Result
 

@@ -27,7 +27,7 @@ namespace Math_Problem_Generator_C_Sharp
         }
 
         System.Windows.Forms.Form f = System.Windows.Forms.Application.OpenForms["quizForm"];
-        MathFunctions.MathParser mp = new MathFunctions.MathParser();
+        //MathFunctions.MathParser mp = new MathFunctions.MathParser();
 
         int retryCount = 0;
         bool decimals = true;

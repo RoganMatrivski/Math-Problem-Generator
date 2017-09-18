@@ -1,9 +1,9 @@
 /*
- * @(#)BooleanOperator.java        3.0.0    2016-05-07
+ * @(#)BooleanOperator.java        4.1.0    2017-04-18
  *
  * You may use this software under the condition of "Simplified BSD License"
  *
- * Copyright 2010-2016 MARIUSZ GROMADA. All rights reserved.
+ * Copyright 2010-2017 MARIUSZ GROMADA. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -70,7 +70,7 @@ namespace org.mariuszgromada.math.mxparser.parsertokens {
 	 *                 <a href="http://sourceforge.net/projects/janetsudoku" target="_blank">Janet Sudoku on SourceForge</a><br>
 	 *                 <a href="http://bitbucket.org/mariuszgromada/janet-sudoku" target="_blank">Janet Sudoku on BitBucket</a><br>
 	 *
-	 * @version        3.0.0
+	 * @version        4.1.0
 	 */
 	[CLSCompliant(true)]
 	public sealed class BooleanOperator {
@@ -110,24 +110,60 @@ namespace org.mariuszgromada.math.mxparser.parsertokens {
 		public const String NOR1_STR			= NEG_STR + OR1_STR;
 		public const String NOR2_STR			= NEG_STR + OR2_STR;
 		public const String XOR_STR				= "(+)";
-		public const String IMP_STR				= "->";
-		public const String CIMP_STR			= "<-";
+		public const String IMP_STR				= "-->";
+		public const String CIMP_STR			= "<--";
 		public const String NIMP_STR			= "-/>";
 		public const String CNIMP_STR			= "</-";
 		public const String EQV_STR				= "<->";
 		/*
+		 * BooleanOperator - syntax.
+		 */
+		public const String NEG_SYN				= "~p";
+		public const String AND_SYN				= "p & q";
+		public const String AND1_SYN			= "p && q";
+		public const String AND2_SYN			= "p /\\ q";
+		public const String NAND_SYN			= "p " + NEG_STR + AND_STR + " q";
+		public const String NAND1_SYN			= "p " + NEG_STR + AND1_STR + " q";
+		public const String NAND2_SYN			= "p " + NEG_STR + AND2_STR + " q";
+		public const String OR_SYN				= "p | q";
+		public const String OR1_SYN				= "p || q";
+		public const String OR2_SYN				= "p \\/ q";
+		public const String NOR_SYN				= "p " + NEG_STR + OR_STR + " q";
+		public const String NOR1_SYN			= "p " + NEG_STR + OR1_STR + " q";
+		public const String NOR2_SYN			= "p " + NEG_STR + OR2_STR + " q";
+		public const String XOR_SYN				= "p (+) q";
+		public const String IMP_SYN				= "p --> q";
+		public const String CIMP_SYN			= "p <-- q";
+		public const String NIMP_SYN			= "p  -/> q";
+		public const String CNIMP_SYN			= "p </- q";
+		public const String EQV_SYN				= "p <-> q";
+		/*
 		 * BooleanOperator - tokens description.
 		 */
-		public const String AND_DESC			= "logical conjunction (AND)";
-		public const String OR_DESC				= "logical disjunction (OR)";
-		public const String NEG_DESC			= "negation";
+		public const String AND_DESC			= "Logical conjunction (AND)";
+		public const String OR_DESC				= "Logical disjunction (OR)";
+		public const String NEG_DESC			= "Negation";
 		public const String NAND_DESC			= "NAND - Sheffer stroke";
-		public const String NOR_DESC			= "logical NOR";
-		public const String XOR_DESC			= "exclusive or (XOR)";
-		public const String IMP_DESC			= "implication (IMP)";
-		public const String CIMP_DESC			= "converse implication (CIMP)";
-		public const String NIMP_DESC			= "material nonimplication (NIMP)";
-		public const String CNIMP_DESC			= "converse nonimplication (CNIMP)";
-		public const String EQV_DESC			= "logical biconditional (EQV)";
+		public const String NOR_DESC			= "Logical NOR";
+		public const String XOR_DESC			= "Exclusive or (XOR)";
+		public const String IMP_DESC			= "Implication (IMP)";
+		public const String CIMP_DESC			= "Converse implication (CIMP)";
+		public const String NIMP_DESC			= "Material nonimplication (NIMP)";
+		public const String CNIMP_DESC			= "Converse nonimplication (CNIMP)";
+		public const String EQV_DESC			= "Logical biconditional (EQV)";
+		/*
+		 * BooleanOperator - since.
+		 */
+		public const String AND_SINCE			= mXparser.NAMEv10;
+		public const String OR_SINCE			= mXparser.NAMEv10;
+		public const String NEG_SINCE			= mXparser.NAMEv10;
+		public const String NAND_SINCE			= mXparser.NAMEv10;
+		public const String NOR_SINCE			= mXparser.NAMEv10;
+		public const String XOR_SINCE			= mXparser.NAMEv10;
+		public const String IMP_SINCE			= mXparser.NAMEv10;
+		public const String CIMP_SINCE			= mXparser.NAMEv10;
+		public const String NIMP_SINCE			= mXparser.NAMEv10;
+		public const String CNIMP_SINCE			= mXparser.NAMEv10;
+		public const String EQV_SINCE			= mXparser.NAMEv10;
 	}
 }

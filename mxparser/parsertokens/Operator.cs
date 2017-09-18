@@ -1,9 +1,9 @@
 /*
- * @(#)Operator.java        3.0.0    2016-05-07
+ * @(#)Operator.java        4.1.0    2017-05-28
  *
  * You may use this software under the condition of "Simplified BSD License"
  *
- * Copyright 2010-2016 MARIUSZ GROMADA. All rights reserved.
+ * Copyright 2010-2017 MARIUSZ GROMADA. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -70,7 +70,7 @@ namespace org.mariuszgromada.math.mxparser.parsertokens {
 	 *                 <a href="http://sourceforge.net/projects/janetsudoku" target="_blank">Janet Sudoku on SourceForge</a><br>
 	 *                 <a href="http://bitbucket.org/mariuszgromada/janet-sudoku" target="_blank">Janet Sudoku on BitBucket</a><br>
 	 *
-	 * @version        3.0.0
+	 * @version        4.1.0
 	 */
 	[CLSCompliant(true)]
 	public sealed class Operator {
@@ -89,25 +89,50 @@ namespace org.mariuszgromada.math.mxparser.parsertokens {
 		public const int POWER_ID				= 5;
 		public const int FACT_ID				= 6;
 		public const int MOD_ID					= 7;
-		/*
+        public const int PERC_ID                = 8;
+        /*
 		 * Operator - tokens key words.
 		 */
-		public const String PLUS_STR 			= "+";
+        public const String PLUS_STR 			= "+";
 		public const String MINUS_STR 			= "-";
 		public const String MULTIPLY_STR 		= "*";
 		public const String DIVIDE_STR 			= "/";
 		public const String POWER_STR 			= "^";
 		public const String FACT_STR 			= "!";
-		public const String MOD_STR				= "%";
+		public const String MOD_STR				= "#";
+        public const String PERC_STR			= "%";
+		/*
+		 * Operator - syntax.
+		 */
+		public const String PLUS_SYN 			= "a + b";
+		public const String MINUS_SYN 			= "a - b";
+		public const String MULTIPLY_SYN 		= "a * b";
+		public const String DIVIDE_SYN 			= "a / b";
+		public const String POWER_SYN 			= "a^b";
+		public const String FACT_SYN 			= "n!";
+		public const String MOD_SYN				= "a # b";
+        public const String PERC_SYN			= "n%";
 		/*
 		 * Operator - tokens description.
 		 */
-		public const String PLUS_DESC 			= "addition";
-		public const String MINUS_DESC 			= "subtraction";
-		public const String MULTIPLY_DESC 		= "multiplication";
-		public const String DIVIDE_DESC 		= "division";
-		public const String POWER_DESC 			= "exponentiation";
-		public const String FACT_DESC			= "factorial";
-		public const String MOD_DESC			= "modulo function";
+		public const String PLUS_DESC 			= "Addition";
+		public const String MINUS_DESC 			= "Subtraction";
+		public const String MULTIPLY_DESC 		= "Nultiplication";
+		public const String DIVIDE_DESC 		= "Division";
+		public const String POWER_DESC 			= "Exponentiation";
+		public const String FACT_DESC			= "Factorial";
+		public const String MOD_DESC			= "Modulo function";
+        public const String PERC_DESC			= "Percentage";
+		/*
+		 * Operator - since.
+		 */
+		public const String PLUS_SINCE 			= mXparser.NAMEv10;
+		public const String MINUS_SINCE 		= mXparser.NAMEv10;
+		public const String MULTIPLY_SINCE 		= mXparser.NAMEv10;
+		public const String DIVIDE_SINCE 		= mXparser.NAMEv10;
+		public const String POWER_SINCE 		= mXparser.NAMEv10;
+		public const String FACT_SINCE			= mXparser.NAMEv10;
+		public const String MOD_SINCE			= mXparser.NAMEv10;
+        public const String PERC_SINCE			= mXparser.NAMEv41;
 	}
 }

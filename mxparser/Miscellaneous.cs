@@ -1,9 +1,9 @@
 /*
- * @(#)Miscellaneous.cs        3.0.0    2016-05-07
+ * @(#)Miscellaneous.cs        4.1.0    2017-05-28
  *
  * You may use this software under the condition of "Simplified BSD License"
  *
- * Copyright 2010-2016 MARIUSZ GROMADA. All rights reserved.
+ * Copyright 2010-2017 MARIUSZ GROMADA. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -148,40 +148,6 @@ namespace org.mariuszgromada.math.mxparser {
 		}
 	}
 	/**
-	* Base class prepresenting key words knwon by the parsere
-	*/
-	internal class KeyWord {
-		internal String wordString;
-		internal int wordId;
-		internal int wordTypeId;
-		internal String description;
-		internal KeyWord() {
-			wordString = "";
-			wordId = ConstantValue.NaN;
-			wordTypeId = ConstantValue.NaN;
-			description = "";
-		}
-		/**
-		 * Constructor - creates key words form wordStrin wordId
-		 * and wordTypId
-		 *
-		 * @param wordString   the word string (refere to below interfaces)
-		 * @param wordId       the word identifier (refere to below interfaces)
-		 * @param wordTypeId   the word type (refere to below interfaces)
-		 */
-		internal KeyWord(String wordString, int wordId, int wordTypeId) {
-			this.wordString = wordString;
-			this.wordId = wordId;
-			this.wordTypeId = wordTypeId;
-		}
-		internal KeyWord(String wordString, String description, int wordId, int wordTypeId) {
-			this.wordString = wordString;
-			this.wordId = wordId;
-			this.wordTypeId = wordTypeId;
-			this.description = description;
-		}
-	}
-	/**
 	* Internal token class
 	* which is used with stack while
 	* evaluation of tokens levels
@@ -248,8 +214,8 @@ namespace org.mariuszgromada.math.mxparser {
 		 *
 		 */
 		public int Compare(KeyWord kw1, KeyWord kw2) {
-			int t1 = kw1.wordTypeId * 1000 + kw1.wordId;
-			int t2 = kw2.wordTypeId * 1000 + kw2.wordId;
+			int t1 = kw1.wordTypeId * 1000000 + kw1.wordId * 1000 + kw1.wordString.Length;
+			int t2 = kw2.wordTypeId * 1000000 + kw2.wordId * 1000 + kw2.wordString.Length;
 			return t1 - t2;
 		}
 	}
@@ -295,5 +261,13 @@ namespace org.mariuszgromada.math.mxparser {
 				eqPos = -1;
 			}
 		}
+	}
+	/**
+	 * Data structure used internally for token to be modified list
+	 */
+	internal class TokenModification {
+		internal String currentToken;
+		internal String newToken;
+		internal String newTokenDescription;
 	}
 }

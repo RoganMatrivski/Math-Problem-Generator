@@ -1,9 +1,9 @@
 /*
- * @(#)Argument.cs        3.0.0    2016-05-07
+ * @(#)Argument.cs        4.0.0    2016-03-26
  *
  * You may use this software under the condition of "Simplified BSD License"
  *
- * Copyright 2010-2016 MARIUSZ GROMADA. All rights reserved.
+ * Copyright 2010-2017 MARIUSZ GROMADA. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -101,7 +101,7 @@ namespace org.mariuszgromada.math.mxparser {
 	 *                 <a href="http://sourceforge.net/projects/janetsudoku" target="_blank">Janet Sudoku on SourceForge</a><br>
 	 *                 <a href="http://bitbucket.org/mariuszgromada/janet-sudoku" target="_blank">Janet Sudoku on BitBucket</a><br>
 	 *
-	 * @version        3.0.0
+	 * @version        4.0.0
 	 *
 	 * @see RecursiveArgument
 	 * @see Expression
@@ -142,8 +142,8 @@ namespace org.mariuszgromada.math.mxparser {
 		 * Argument type id for the definition of key words
 		 * known by the parser.
 		 */
-		internal const int TYPE_ID			= 101;
-		internal const String TYPE_DESC		= "User defined argument";
+		public const int TYPE_ID			= 101;
+		public const String TYPE_DESC		= "User defined argument";
 		/**
 		 * Description of the argument.
 		 */
@@ -241,7 +241,7 @@ namespace org.mariuszgromada.math.mxparser {
 		public Argument(String argumentName, double argumentValue) : base(Argument.TYPE_ID) {
 			argumentExpression = new Expression();
 			if (mXparser.regexMatch(argumentName, ParserSymbol.nameOnlyTokenRegExp)) {
-				this.argumentName = String.Copy(argumentName);
+				this.argumentName = "" + argumentName;
 				this.argumentValue = argumentValue;
 				argumentType = FREE_ARGUMENT;
 			}
@@ -266,7 +266,7 @@ namespace org.mariuszgromada.math.mxparser {
 		 */
 		public Argument(String argumentName, String argumentExpressionString, params PrimitiveElement[] elements) : base(Argument.TYPE_ID) {
 			if (mXparser.regexMatch(argumentName, ParserSymbol.nameOnlyTokenRegExp)) {
-				this.argumentName=String.Copy(argumentName);
+				this.argumentName="" + argumentName;
 				argumentValue=ARGUMENT_INITIAL_VALUE;
 				argumentExpression = new Expression(argumentExpressionString, elements);
 				argumentExpression.setDescription(argumentName);
@@ -872,14 +872,6 @@ namespace org.mariuszgromada.math.mxparser {
 			newArg.description = this.description;
 			newArg.n = this.n;
 			return newArg;
-		}
-		/**
-		 * Gets license info
-		 *
-		 * @return     license info as string.
-		 */
-		public String getLicense() {
-			return mXparser.LICENSE;
 		}
 	}
 }

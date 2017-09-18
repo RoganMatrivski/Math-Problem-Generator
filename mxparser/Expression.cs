@@ -1,9 +1,9 @@
 /*
- * @(#)Expression.cs        3.0.0    2016-05-07
+ * @(#)Expression.cs        4.2.0   2017-09-18
  *
  * You may use this software under the condition of "Simplified BSD License"
  *
- * Copyright 2010-2016 MARIUSZ GROMADA. All rights reserved.
+ * Copyright 2010-2017 MARIUSZ GROMADA. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -90,7 +90,7 @@ namespace org.mariuszgromada.math.mxparser {
 	 *                 <a href="http://sourceforge.net/projects/janetsudoku" target="_blank">Janet Sudoku on SourceForge</a><br>
 	 *                 <a href="http://bitbucket.org/mariuszgromada/janet-sudoku" target="_blank">Janet Sudoku on BitBucket</a><br>
 	 *
-	 * @version        3.0.0
+	 * @version        4.2.0
 	 *
 	 * @see            Argument
 	 * @see            RecursiveArgument
@@ -238,12 +238,48 @@ namespace org.mariuszgromada.math.mxparser {
 		 */
 		private bool recursionCallPending;
 		/**
+		 * Internal counter to avoid infinite loops while calculating
+		 * expression defined in the way shown by below examples
+		 *
+		 * Argument x = new Argument("x = 2*y");
+		 * Argument y = new Argument("y = 2*x");
+		 * x.addDefinitions(y);
+		 * y.addDefinitions(x);
+		 *
+		 * Function f = new Function("f(x) = 2*g(x)");
+		 * Function g = new Function("g(x) = 2*f(x)");
+		 * f.addDefinitions(g);
+		 * g.addDefinitions(f);
+		 */
+		private int recursionCallsCounter;
+		/**
 		 * Internal indicator for tokenization process
 		 * if true, then keywords such as constants
 		 * functions etc.. will not be recognized
 		 * during tokenization
 		 */
 		private bool parserKeyWordsOnly;
+		/**
+		 * Internal indicator for calculation process
+		 * Expression.Calculate() method
+		 * It show whether to build again tokens list
+		 * if clone - build again
+		 * if not clone - build only at the beginning
+		 *
+		 * Indicator helps to solve the problem with
+		 * above definitions
+		 *
+		 * Function f = new Function("f(x) = 2*g(x)");
+		 * Function g = new Function("g(x) = 2*f(x)");
+		 * f.addDefinitions(g);
+		 * g.addDefinitions(f);
+		 */
+		private bool internalClone;
+		/**
+		 * mXparser options changeset
+		 * used in checkSyntax() method
+		 */
+		private int optionsChangesetNumber = -1;
 		/*=================================================
 		 *
 		 * Related expressions handling
@@ -321,6 +357,8 @@ namespace org.mariuszgromada.math.mxparser {
 		internal void setExpressionModifiedFlag() {
 			if (recursionCallPending == false) {
 				recursionCallPending = true;
+				recursionCallsCounter = 0;
+				internalClone = false;
 				expressionWasModified = true;
 				syntaxStatus = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
 				errorMessage = "Syntax status unknown.";
@@ -337,6 +375,8 @@ namespace org.mariuszgromada.math.mxparser {
 			errorMessage = "";
 			computingTime = 0;
 			recursionCallPending = false;
+			recursionCallsCounter = 0;
+			internalClone = false;
 			parserKeyWordsOnly = false;
 			disableUlpRounding = KEEP_ULP_ROUNDING_SETTINGS;
 		}
@@ -390,7 +430,7 @@ namespace org.mariuszgromada.math.mxparser {
 		 */
 		public Expression(String expressionString, params PrimitiveElement[] elements) {
 			expressionInit();
-			this.expressionString = String.Copy(expressionString);
+			this.expressionString = "" + expressionString;
 			setExpressionModifiedFlag();
 			addDefinitions(elements);
 		}
@@ -402,7 +442,7 @@ namespace org.mariuszgromada.math.mxparser {
 		 */
 		internal Expression(String expressionString, bool parserKeyWordsOnly) {
 			expressionInit();
-			this.expressionString = String.Copy(expressionString);
+			this.expressionString = "" + expressionString;
 			setExpressionModifiedFlag();
 			this.parserKeyWordsOnly = parserKeyWordsOnly;
 		}
@@ -420,7 +460,7 @@ namespace org.mariuszgromada.math.mxparser {
 		 */
 		internal Expression(String expressionString, List<Token> initialTokens, List<Argument> argumentsList,
 				List<Function> functionsList, List<Constant> constantsList, bool disableUlpRounding) {
-			this.expressionString = String.Copy(expressionString);
+			this.expressionString = "" + expressionString;
 			this.initialTokens = initialTokens;
 			this.argumentsList = argumentsList;
 			this.functionsList = functionsList;
@@ -432,6 +472,8 @@ namespace org.mariuszgromada.math.mxparser {
 			errorMessage = "";
 			computingTime = 0;
 			recursionCallPending = false;
+			recursionCallsCounter = 0;
+			internalClone = false;
 			parserKeyWordsOnly = false;
 			this.disableUlpRounding = disableUlpRounding;
 			setSilentMode();
@@ -458,7 +500,7 @@ namespace org.mariuszgromada.math.mxparser {
 		internal Expression(String expressionString, List<Argument> argumentsList,
 				List<Function> functionsList, List<Constant> constantsList
 				,bool i) {
-			this.expressionString = String.Copy(expressionString);
+			this.expressionString = "" + expressionString;
 			expressionInternalVarsInit();
 			setSilentMode();
 			disableRecursiveMode();
@@ -474,8 +516,8 @@ namespace org.mariuszgromada.math.mxparser {
 		 * @param      expression          the base expression
 		 */
 		private Expression(Expression expression) {
-			expressionString = String.Copy(expression.expressionString);
-			description = String.Copy(expression.description);
+			expressionString = "" + expression.expressionString;
+			description = "" + expression.description;
 			argumentsList = expression.argumentsList;
 			functionsList = expression.functionsList;
 			constantsList = expression.constantsList;
@@ -486,10 +528,11 @@ namespace org.mariuszgromada.math.mxparser {
 			recursiveMode = expression.recursiveMode;
 			verboseMode = expression.verboseMode;
 			syntaxStatus = expression.syntaxStatus;
-			errorMessage = String.Copy(expression.errorMessage);
+			errorMessage = "" + expression.errorMessage;
 			recursionCallPending = expression.recursionCallPending;
 			parserKeyWordsOnly = expression.parserKeyWordsOnly;
 			disableUlpRounding = expression.disableUlpRounding;
+			internalClone = true;
 		}
 		/**
 		 * Sets (modifies expression) expression string.
@@ -1018,7 +1061,8 @@ namespace org.mariuszgromada.math.mxparser {
 				foreach (Function f in functions) {
 					if (f != null) {
 						functionsList.Add(f);
-						f.addRelatedExpression(this);
+						if (f.getFunctionBodyType() == Function.BODY_RUNTIME)
+							f.addRelatedExpression(this);
 					}
 				}
 				setExpressionModifiedFlag();
@@ -1426,47 +1470,35 @@ namespace org.mariuszgromada.math.mxparser {
 				&&	( tokensList[rPos].tokenId == ParserSymbol.RIGHT_PARENTHESES_ID )
 				&&	( tokensList[rPos].tokenLevel ==  ifLevel)	)	)
 				rPos++;
-			int from;
-			int to;
 			if ( !Double.IsNaN(ifCondition) ) {
 				if (ifCondition != 0) {
 					setToNumber(c2Pos+1, Double.NaN);
 					tokensList[c2Pos+1].tokenLevel = ifLevel;
-					from = c2Pos+2;
-					to = rPos-1;
+					removeTokens(c2Pos + 2, rPos - 1);
 				} else {
 					setToNumber(c1Pos+1, Double.NaN);
 					tokensList[c1Pos+1].tokenLevel = ifLevel;
-					from = c1Pos+2;
-					to = c2Pos-1;
+					removeTokens(c1Pos + 2, c2Pos - 1);
 				}
-				if (from < to)
-					for (int p = to; p >= from; p--)
-						tokensList.RemoveAt(p);
 			} else {
 				setToNumber(c1Pos+1, Double.NaN);
 				setToNumber(c2Pos+1, Double.NaN);
 				tokensList[c1Pos+1].tokenLevel = ifLevel;
 				tokensList[c2Pos+1].tokenLevel = ifLevel;
-				from = c2Pos+2;
-				to = rPos-1;
-				if (from < to)
-					for (int p = to; p >= from; p--)
-						tokensList.RemoveAt(p);
-				from = c1Pos+2;
-				to = c2Pos-1;
-				if (from < to)
-					for (int p = to; p >= from; p--)
-						tokensList.RemoveAt(p);
+				removeTokens(c2Pos + 2, rPos - 1);
+				removeTokens(c1Pos + 2, c2Pos - 1);
 			}
 			setToNumber(lPos+1, ifCondition, ulpRound);
 			tokensList[lPos+1].tokenLevel = ifLevel;
-			from = lPos+2;
-			to = c1Pos-1;
-			if (from < to)
+			removeTokens(lPos + 2, c1Pos - 1);
+			tokensList[pos].tokenId = Function3Arg.IF_ID;
+		}
+		private void removeTokens(int from, int to) {
+			if (from < to) {
 				for (int p = to; p >= from; p--)
 					tokensList.RemoveAt(p);
-			tokensList[pos].tokenId = Function3Arg.IF_ID;
+			} else if (from == to)
+				tokensList.RemoveAt(from);
 		}
 		private void ifSetRemove(int pos, double ifCondition) {
 			ifSetRemove(pos, ifCondition, false);
@@ -1628,16 +1660,49 @@ namespace org.mariuszgromada.math.mxparser {
 		 *=================================================
 		 */
 		/**
-		 * Arguments handling.
+		 * Free Arguments handling.
 		 *
 		 * @param      pos                 the token position
 		 */
-		private void ARGUMENT(int pos) {
+		private void FREE_ARGUMENT(int pos) {
 			Argument argument = argumentsList[ tokensList[pos].tokenId ];
 			bool argumentVerboseMode = argument.getVerboseMode();
 			if (verboseMode == true)
 				argument.setVerboseMode();
-			setToNumber(pos,argument.getArgumentValue());
+			setToNumber(pos, argument.getArgumentValue());
+			if (argumentVerboseMode == false)
+				argument.setSilentMode();
+		}
+		/**
+		 * Dependent Arguments handling.
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void DEPENDENT_ARGUMENT(int pos) {
+			Argument argument = argumentsList[ tokensList[pos].tokenId ];
+			bool argumentVerboseMode = argument.getVerboseMode();
+			if (verboseMode == true)
+				argument.setVerboseMode();
+			/*
+			 * Handling possible recursive calls that can change
+			 * the structure of the tokens list, i.e.
+			 *
+			 * Argument x = new Argument("x = 2*y");
+			 * Argument y = new Argument("y = 2*x");
+			 * x.addDefinitions(y);
+			 * y.addDefinitions(x);
+			 * x.getArgumentValue();
+			 */
+			int tokensListSizeBefore = tokensList.Count;
+			Token tokenBefore = tokensList[pos];
+			double argumentValue = argument.getArgumentValue();
+			int tokensListSizeAfter = tokensList.Count;
+			if (tokensListSizeBefore == tokensListSizeAfter) {
+				Token tokenAfter = tokensList[pos];
+				if ((tokenBefore.tokenTypeId == tokenAfter.tokenTypeId) && (tokenBefore.tokenId == tokenAfter.tokenId)) {
+					setToNumber(pos, argumentValue);
+				}
+			}
 			if (argumentVerboseMode == false)
 				argument.setSilentMode();
 		}
@@ -1649,9 +1714,10 @@ namespace org.mariuszgromada.math.mxparser {
 		private void USER_FUNCTION(int pos) {
 			Function function;
 			Function fun = functionsList[ tokensList[pos].tokenId ];
-			if (fun.getRecursiveMode() == true)
+			if (fun.getRecursiveMode() == true) {
 				function = fun.clone();
-			else
+				function.functionExpression.recursionCallsCounter = recursionCallsCounter;
+			} else
 				function = fun;
 			int argsNumber = function.getParametersNumber();
 			for (int argIdx = 0; argIdx < argsNumber; argIdx++)
@@ -1659,19 +1725,42 @@ namespace org.mariuszgromada.math.mxparser {
 			bool functionVerboseMode = function.getVerboseMode();
 			if (verboseMode == true)
 				function.setVerboseMode();
+			/*
+			 * Handling possible recursive calls that can change
+			 * the structure of the tokens list, i.e.
+			 *
+			 * Function f = new Function("f(x) = 2*g(x)");
+			 * Function g = new Function("g(x) = 2*f(x)");
+			 * f.addDefinitions(g);
+			 * g.addDefinitions(f);
+			 */
+			int tokensListSizeBefore = tokensList.Count;
+			Token tokenBefore = tokensList[pos];
 			double value;
 			try {
 				value = function.calculate();
-			} catch(StackOverflowException soe){
+			} catch(
+				#if PCL || CORE || NETSTANDARD
+					Exception
+				#else
+					StackOverflowException
+				#endif
+			soe){
 				value = Double.NaN;
 				errorMessage = soe.Message;
 			}
-			setToNumber(pos, value);
-			tokensList[pos].tokenLevel--;
+			int tokensListSizeAfter = tokensList.Count;
+			if (tokensListSizeBefore == tokensListSizeAfter) {
+				Token tokenAfter = tokensList[pos];
+				if ((tokenBefore.tokenTypeId == tokenAfter.tokenTypeId) && (tokenBefore.tokenId == tokenAfter.tokenId)) {
+					setToNumber(pos, value);
+					tokensList[pos].tokenLevel--;
+					for (int argIdx = argsNumber; argIdx > 0; argIdx--)
+						tokensList.RemoveAt(pos + argIdx);
+				}
+			}
 			if (functionVerboseMode == false)
 				function.setSilentMode();
-			for (int argIdx = argsNumber; argIdx > 0 ; argIdx--)
-				tokensList.RemoveAt(pos+argIdx);
 		}
 		/**
 		 * User constants handling.
@@ -1699,7 +1788,7 @@ namespace org.mariuszgromada.math.mxparser {
 				argument.setSilentMode();
 		}
 		/**
-		 * COnstants handling handling.
+		 * Constants handling.
 		 *
 		 * @param      pos                 the token position
 		 */
@@ -1835,8 +1924,454 @@ namespace org.mariuszgromada.math.mxparser {
 			case ConstantValue.GOMPERTZ_ID:
 				constValue = MathConstants.GOMPERTZ;
 				break;
+			case ConstantValue.LIGHT_SPEED_ID:
+				constValue = PhysicalConstants.LIGHT_SPEED;
+				break;
+			case ConstantValue.GRAVITATIONAL_CONSTANT_ID:
+				constValue = PhysicalConstants.GRAVITATIONAL_CONSTANT;
+				break;
+			case ConstantValue.GRAVIT_ACC_EARTH_ID:
+				constValue = PhysicalConstants.GRAVIT_ACC_EARTH;
+				break;
+			case ConstantValue.PLANCK_CONSTANT_ID:
+				constValue = PhysicalConstants.PLANCK_CONSTANT;
+				break;
+			case ConstantValue.PLANCK_CONSTANT_REDUCED_ID:
+				constValue = PhysicalConstants.PLANCK_CONSTANT_REDUCED;
+				break;
+			case ConstantValue.PLANCK_LENGTH_ID:
+				constValue = PhysicalConstants.PLANCK_LENGTH;
+				break;
+			case ConstantValue.PLANCK_MASS_ID:
+				constValue = PhysicalConstants.PLANCK_MASS;
+				break;
+			case ConstantValue.PLANCK_TIME_ID:
+				constValue = PhysicalConstants.PLANCK_TIME;
+				break;
+			case ConstantValue.LIGHT_YEAR_ID:
+				constValue = AstronomicalConstants.LIGHT_YEAR;
+				break;
+			case ConstantValue.ASTRONOMICAL_UNIT_ID:
+				constValue = AstronomicalConstants.ASTRONOMICAL_UNIT;
+				break;
+			case ConstantValue.PARSEC_ID:
+				constValue = AstronomicalConstants.PARSEC;
+				break;
+			case ConstantValue.KILOPARSEC_ID:
+				constValue = AstronomicalConstants.KILOPARSEC;
+				break;
+			case ConstantValue.EARTH_RADIUS_EQUATORIAL_ID:
+				constValue = AstronomicalConstants.EARTH_RADIUS_EQUATORIAL;
+				break;
+			case ConstantValue.EARTH_RADIUS_POLAR_ID:
+				constValue = AstronomicalConstants.EARTH_RADIUS_POLAR;
+				break;
+			case ConstantValue.EARTH_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.EARTH_RADIUS_MEAN;
+				break;
+			case ConstantValue.EARTH_MASS_ID:
+				constValue = AstronomicalConstants.EARTH_MASS;
+				break;
+			case ConstantValue.EARTH_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.EARTH_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.MOON_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.MOON_RADIUS_MEAN;
+				break;
+			case ConstantValue.MOON_MASS_ID:
+				constValue = AstronomicalConstants.MOON_MASS;
+				break;
+			case ConstantValue.MONN_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.MONN_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.SOLAR_RADIUS_ID:
+				constValue = AstronomicalConstants.SOLAR_RADIUS;
+				break;
+			case ConstantValue.SOLAR_MASS_ID:
+				constValue = AstronomicalConstants.SOLAR_MASS;
+				break;
+			case ConstantValue.MERCURY_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.MERCURY_RADIUS_MEAN;
+				break;
+			case ConstantValue.MERCURY_MASS_ID:
+				constValue = AstronomicalConstants.MERCURY_MASS;
+				break;
+			case ConstantValue.MERCURY_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.MERCURY_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.VENUS_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.VENUS_RADIUS_MEAN;
+				break;
+			case ConstantValue.VENUS_MASS_ID:
+				constValue = AstronomicalConstants.VENUS_MASS;
+				break;
+			case ConstantValue.VENUS_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.VENUS_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.MARS_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.MARS_RADIUS_MEAN;
+				break;
+			case ConstantValue.MARS_MASS_ID:
+				constValue = AstronomicalConstants.MARS_MASS;
+				break;
+			case ConstantValue.MARS_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.MARS_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.JUPITER_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.JUPITER_RADIUS_MEAN;
+				break;
+			case ConstantValue.JUPITER_MASS_ID:
+				constValue = AstronomicalConstants.JUPITER_MASS;
+				break;
+			case ConstantValue.JUPITER_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.JUPITER_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.SATURN_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.SATURN_RADIUS_MEAN;
+				break;
+			case ConstantValue.SATURN_MASS_ID:
+				constValue = AstronomicalConstants.SATURN_MASS;
+				break;
+			case ConstantValue.SATURN_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.SATURN_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.URANUS_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.URANUS_RADIUS_MEAN;
+				break;
+			case ConstantValue.URANUS_MASS_ID:
+				constValue = AstronomicalConstants.URANUS_MASS;
+				break;
+			case ConstantValue.URANUS_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.URANUS_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.NEPTUNE_RADIUS_MEAN_ID:
+				constValue = AstronomicalConstants.NEPTUNE_RADIUS_MEAN;
+				break;
+			case ConstantValue.NEPTUNE_MASS_ID:
+				constValue = AstronomicalConstants.NEPTUNE_MASS;
+				break;
+			case ConstantValue.NEPTUNE_SEMI_MAJOR_AXIS_ID:
+				constValue = AstronomicalConstants.NEPTUNE_SEMI_MAJOR_AXIS;
+				break;
+			case ConstantValue.TRUE_ID:
+				constValue = BooleanAlgebra.TRUE;
+				break;
+			case ConstantValue.FALSE_ID:
+				constValue = BooleanAlgebra.FALSE;
+				break;
+			case ConstantValue.NAN_ID:
+				constValue = MathConstants.NOT_A_NUMBER;
+				break;
 			}
 			setToNumber(pos, constValue);
+		}
+		/**
+		 * Constants handling.
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void UNIT(int pos) {
+			double unitValue = Double.NaN;
+			switch (tokensList[pos].tokenId) {
+			/* Ratio, Fraction */
+			case Unit.PERC_ID:
+				unitValue = Units.PERC;
+				break;
+			case Unit.PROMIL_ID:
+				unitValue = Units.PROMIL;
+				break;
+			/* Metric prefixes */
+			case Unit.YOTTA_ID:
+				unitValue = Units.YOTTA;
+				break;
+			case Unit.ZETTA_ID:
+				unitValue = Units.ZETTA;
+				break;
+			case Unit.EXA_ID:
+				unitValue = Units.EXA;
+				break;
+			case Unit.PETA_ID:
+				unitValue = Units.PETA;
+				break;
+			case Unit.TERA_ID:
+				unitValue = Units.TERA;
+				break;
+			case Unit.GIGA_ID:
+				unitValue = Units.GIGA;
+				break;
+			case Unit.MEGA_ID:
+				unitValue = Units.MEGA;
+				break;
+			case Unit.KILO_ID:
+				unitValue = Units.KILO;
+				break;
+			case Unit.HECTO_ID:
+				unitValue = Units.HECTO;
+				break;
+			case Unit.DECA_ID:
+				unitValue = Units.DECA;
+				break;
+			case Unit.DECI_ID:
+				unitValue = Units.DECI;
+				break;
+			case Unit.CENTI_ID:
+				unitValue = Units.CENTI;
+				break;
+			case Unit.MILLI_ID:
+				unitValue = Units.MILLI;
+				break;
+			case Unit.MICRO_ID:
+				unitValue = Units.MICRO;
+				break;
+			case Unit.NANO_ID:
+				unitValue = Units.NANO;
+				break;
+			case Unit.PICO_ID:
+				unitValue = Units.PICO;
+				break;
+			case Unit.FEMTO_ID:
+				unitValue = Units.FEMTO;
+				break;
+			case Unit.ATTO_ID:
+				unitValue = Units.ATTO;
+				break;
+			case Unit.ZEPTO_ID:
+				unitValue = Units.ZEPTO;
+				break;
+			case Unit.YOCTO_ID:
+				unitValue = Units.YOCTO;
+				break;
+			/* Units of length / distance */
+			case Unit.METRE_ID:
+				unitValue = Units.METRE;
+				break;
+			case Unit.KILOMETRE_ID:
+				unitValue = Units.KILOMETRE;
+				break;
+			case Unit.CENTIMETRE_ID:
+				unitValue = Units.CENTIMETRE;
+				break;
+			case Unit.MILLIMETRE_ID:
+				unitValue = Units.MILLIMETRE;
+				break;
+			case Unit.INCH_ID:
+				unitValue = Units.INCH;
+				break;
+			case Unit.YARD_ID:
+				unitValue = Units.YARD;
+				break;
+			case Unit.FEET_ID:
+				unitValue = Units.FEET;
+				break;
+			case Unit.MILE_ID:
+				unitValue = Units.MILE;
+				break;
+			case Unit.NAUTICAL_MILE_ID:
+				unitValue = Units.NAUTICAL_MILE;
+				break;
+			/* Units of area */
+			case Unit.METRE2_ID:
+				unitValue = Units.METRE2;
+				break;
+			case Unit.CENTIMETRE2_ID:
+				unitValue = Units.CENTIMETRE2;
+				break;
+			case Unit.MILLIMETRE2_ID:
+				unitValue = Units.MILLIMETRE2;
+				break;
+			case Unit.ARE_ID:
+				unitValue = Units.ARE;
+				break;
+			case Unit.HECTARE_ID:
+				unitValue = Units.HECTARE;
+				break;
+			case Unit.ACRE_ID:
+				unitValue = Units.ACRE;
+				break;
+			case Unit.KILOMETRE2_ID:
+				unitValue = Units.KILOMETRE2;
+				break;
+			/* Units of volume */
+			case Unit.MILLIMETRE3_ID:
+				unitValue = Units.MILLIMETRE3;
+				break;
+			case Unit.CENTIMETRE3_ID:
+				unitValue = Units.CENTIMETRE3;
+				break;
+			case Unit.METRE3_ID:
+				unitValue = Units.METRE3;
+				break;
+			case Unit.KILOMETRE3_ID:
+				unitValue = Units.KILOMETRE3;
+				break;
+			case Unit.MILLILITRE_ID:
+				unitValue = Units.MILLILITRE;
+				break;
+			case Unit.LITRE_ID:
+				unitValue = Units.LITRE;
+				break;
+			case Unit.GALLON_ID:
+				unitValue = Units.GALLON;
+				break;
+			case Unit.PINT_ID:
+				unitValue = Units.PINT;
+				break;
+			/* Units of time */
+			case Unit.SECOND_ID:
+				unitValue = Units.SECOND;
+				break;
+			case Unit.MILLISECOND_ID:
+				unitValue = Units.MILLISECOND;
+				break;
+			case Unit.MINUTE_ID:
+				unitValue = Units.MINUTE;
+				break;
+			case Unit.HOUR_ID:
+				unitValue = Units.HOUR;
+				break;
+			case Unit.DAY_ID:
+				unitValue = Units.DAY;
+				break;
+			case Unit.WEEK_ID:
+				unitValue = Units.WEEK;
+				break;
+			case Unit.JULIAN_YEAR_ID:
+				unitValue = Units.JULIAN_YEAR;
+				break;
+			/* Units of mass */
+			case Unit.KILOGRAM_ID:
+				unitValue = Units.KILOGRAM;
+				break;
+			case Unit.GRAM_ID:
+				unitValue = Units.GRAM;
+				break;
+			case Unit.MILLIGRAM_ID:
+				unitValue = Units.MILLIGRAM;
+				break;
+			case Unit.DECAGRAM_ID:
+				unitValue = Units.DECAGRAM;
+				break;
+			case Unit.TONNE_ID:
+				unitValue = Units.TONNE;
+				break;
+			case Unit.OUNCE_ID:
+				unitValue = Units.OUNCE;
+				break;
+			case Unit.POUND_ID:
+				unitValue = Units.POUND;
+				break;
+			/* Units of information */
+			case Unit.BIT_ID:
+				unitValue = Units.BIT;
+				break;
+			case Unit.KILOBIT_ID:
+				unitValue = Units.KILOBIT;
+				break;
+			case Unit.MEGABIT_ID:
+				unitValue = Units.MEGABIT;
+				break;
+			case Unit.GIGABIT_ID:
+				unitValue = Units.GIGABIT;
+				break;
+			case Unit.TERABIT_ID:
+				unitValue = Units.TERABIT;
+				break;
+			case Unit.PETABIT_ID:
+				unitValue = Units.PETABIT;
+				break;
+			case Unit.EXABIT_ID:
+				unitValue = Units.EXABIT;
+				break;
+			case Unit.ZETTABIT_ID:
+				unitValue = Units.ZETTABIT;
+				break;
+			case Unit.YOTTABIT_ID:
+				unitValue = Units.YOTTABIT;
+				break;
+			case Unit.BYTE_ID:
+				unitValue = Units.BYTE;
+				break;
+			case Unit.KILOBYTE_ID:
+				unitValue = Units.KILOBYTE;
+				break;
+			case Unit.MEGABYTE_ID:
+				unitValue = Units.MEGABYTE;
+				break;
+			case Unit.GIGABYTE_ID:
+				unitValue = Units.GIGABYTE;
+				break;
+			case Unit.TERABYTE_ID:
+				unitValue = Units.TERABYTE;
+				break;
+			case Unit.PETABYTE_ID:
+				unitValue = Units.PETABYTE;
+				break;
+			case Unit.EXABYTE_ID:
+				unitValue = Units.EXABYTE;
+				break;
+			case Unit.ZETTABYTE_ID:
+				unitValue = Units.ZETTABYTE;
+				break;
+			case Unit.YOTTABYTE_ID:
+				unitValue = Units.YOTTABYTE;
+				break;
+			/* Units of energy */
+			case Unit.JOULE_ID:
+				unitValue = Units.JOULE;
+				break;
+			case Unit.ELECTRONO_VOLT_ID:
+				unitValue = Units.ELECTRONO_VOLT;
+				break;
+			case Unit.KILO_ELECTRONO_VOLT_ID:
+				unitValue = Units.KILO_ELECTRONO_VOLT;
+				break;
+			case Unit.MEGA_ELECTRONO_VOLT_ID:
+				unitValue = Units.MEGA_ELECTRONO_VOLT;
+				break;
+			case Unit.GIGA_ELECTRONO_VOLT_ID:
+				unitValue = Units.GIGA_ELECTRONO_VOLT;
+				break;
+			case Unit.TERA_ELECTRONO_VOLT_ID:
+				unitValue = Units.TERA_ELECTRONO_VOLT;
+				break;
+			/* Units of speed */
+			case Unit.METRE_PER_SECOND_ID:
+				unitValue = Units.METRE_PER_SECOND;
+				break;
+			case Unit.KILOMETRE_PER_HOUR_ID:
+				unitValue = Units.KILOMETRE_PER_HOUR;
+				break;
+			case Unit.MILE_PER_HOUR_ID:
+				unitValue = Units.MILE_PER_HOUR;
+				break;
+			case Unit.KNOT_ID:
+				unitValue = Units.KNOT;
+				break;
+			/* Units of acceleration */
+			case Unit.METRE_PER_SECOND2_ID:
+				unitValue = Units.METRE_PER_SECOND2;
+				break;
+			case Unit.KILOMETRE_PER_HOUR2_ID:
+				unitValue = Units.KILOMETRE_PER_HOUR2;
+				break;
+			case Unit.MILE_PER_HOUR2_ID:
+				unitValue = Units.MILE_PER_HOUR2;
+				break;
+			/* Units of angle */
+			case Unit.RADIAN_ARC_ID:
+				unitValue = Units.RADIAN_ARC;
+				break;
+			case Unit.DEGREE_ARC_ID:
+				unitValue = Units.DEGREE_ARC;
+				break;
+			case Unit.MINUTE_ARC_ID:
+				unitValue = Units.MINUTE_ARC;
+				break;
+			case Unit.SECOND_ARC_ID:
+				unitValue = Units.SECOND_ARC;
+				break;
+			}
+			setToNumber(pos, unitValue);
 		}
 		/**
 		 * Random Variables handling.
@@ -2209,6 +2744,66 @@ namespace org.mariuszgromada.math.mxparser {
 			double a = getTokenValue(pos-1);
 			double b = getTokenValue(pos+1);
 			opSetDecreaseRemove(pos, BinaryRelations.geq(a, b) );
+		}
+		/**
+		 * Bitwise COMPL
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BITWISE_COMPL(int pos) {
+			long a = (long)getTokenValue(pos + 1);
+			setToNumber(pos, ~a);
+			tokensList.RemoveAt(pos + 1);
+		}
+		/**
+		 * Bitwise AND
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BITWISE_AND(int pos) {
+			long a = (long)getTokenValue(pos - 1);
+			long b = (long)getTokenValue(pos + 1);
+			opSetDecreaseRemove(pos, a & b);
+		}
+		/**
+		 * Bitwise OR
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BITWISE_OR(int pos) {
+			long a = (long)getTokenValue(pos - 1);
+			long b = (long)getTokenValue(pos + 1);
+			opSetDecreaseRemove(pos, a | b);
+		}
+		/**
+		 * Bitwise XOR
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BITWISE_XOR(int pos) {
+			long a = (long)getTokenValue(pos - 1);
+			long b = (long)getTokenValue(pos + 1);
+			opSetDecreaseRemove(pos, a ^ b);
+		}
+		/**
+		 * Bitwise LEFT SHIFT
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BITWISE_LEFT_SHIFT(int pos) {
+			long a = (long)getTokenValue(pos - 1);
+			int b = (int)getTokenValue(pos + 1);
+			opSetDecreaseRemove(pos, a << b);
+		}
+		/**
+		 * Bitwise RIGHT SHIFT
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BITWISE_RIGHT_SHIFT(int pos) {
+			long a = (long)getTokenValue(pos - 1);
+			int b = (int)getTokenValue(pos + 1);
+			opSetDecreaseRemove(pos, a >> b);
 		}
 		/**
 		 * Sine function
@@ -2650,6 +3245,17 @@ namespace org.mariuszgromada.math.mxparser {
 			tokensList.RemoveAt(pos-1);
 		}
 		/**
+		 * Percentage
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void PERC(int pos) {
+			double a = getTokenValue(pos - 1);
+			setToNumber(pos, a * Units.PERC);
+			tokensList.RemoveAt(pos - 1);
+		}
+		/**
 		 * Negation
 		 * Sets tokens to number token
 		 *
@@ -2704,6 +3310,69 @@ namespace org.mariuszgromada.math.mxparser {
 		private void ULP(int pos) {
 			double x = getTokenValue(pos + 1);
 			f1SetDecreaseRemove(pos, MathFunctions.ulp(x));
+		}
+		/**
+		 * Is Not-a-Number
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void ISNAN(int pos) {
+			double x = getTokenValue(pos + 1);
+			if (Double.IsNaN(x))
+				f1SetDecreaseRemove(pos, BooleanAlgebra.TRUE);
+			else
+				f1SetDecreaseRemove(pos, BooleanAlgebra.FALSE);
+		}
+		/**
+		 * Number of digits in base 10
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void NDIG10(int pos) {
+			double x = getTokenValue(pos + 1);
+			f1SetDecreaseRemove(pos, NumberTheory.numberOfDigits(x));
+		}
+		/**
+		 * Number of prime factors - distinct
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void NFACT(int pos) {
+			double n = getTokenValue(pos + 1);
+			f1SetDecreaseRemove(pos, NumberTheory.numberOfPrimeFactors(n));
+		}
+		/**
+		 * Arcuus secant
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void ARCSEC(int pos) {
+			double x = getTokenValue(pos + 1);
+			f1SetDecreaseRemove(pos, MathFunctions.asec(x));
+		}
+		/**
+		 * Arcuus cosecant
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void ARCCSC(int pos) {
+			double x = getTokenValue(pos + 1);
+			f1SetDecreaseRemove(pos, MathFunctions.acosec(x));
+		}
+		/**
+		 * Gamma special function
+		 * Sets tokens to number token
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void GAMMA(int pos) {
+			double x = getTokenValue(pos + 1);
+			f1SetDecreaseRemove(pos, SpecialFunctions.lanchosGamma(x));
 		}
 		/**
 		 * Logarithm
@@ -2781,7 +3450,7 @@ namespace org.mariuszgromada.math.mxparser {
 		private void STIRLING1_NUMBER(int pos) {
 			double n = getTokenValue(pos+1);
 			double k = getTokenValue(pos+2);
-			f2SetDecreaseRemove(pos, MathFunctions.Srirling1Number(n, k) );
+			f2SetDecreaseRemove(pos, MathFunctions.Stirling1Number(n, k) );
 		}
 		/**
 		 * Stirling number of the second kind.
@@ -2791,7 +3460,7 @@ namespace org.mariuszgromada.math.mxparser {
 		private void STIRLING2_NUMBER(int pos) {
 			double n = getTokenValue(pos+1);
 			double k = getTokenValue(pos+2);
-			f2SetDecreaseRemove(pos, MathFunctions.Srirling2Number(n, k) );
+			f2SetDecreaseRemove(pos, MathFunctions.Stirling2Number(n, k) );
 		}
 		/**
 		 * Worpitzky number.
@@ -2884,6 +3553,56 @@ namespace org.mariuszgromada.math.mxparser {
 			f2SetDecreaseRemove(pos, ProbabilityDistributions.rndNormal(mean, stddev, ProbabilityDistributions.randomGenerator));
 		}
 		/**
+		 * Number of digits in given numeral system
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void NDIG(int pos) {
+			double number = getTokenValue(pos + 1);
+			double numeralSystemBase = getTokenValue(pos + 2);
+			f2SetDecreaseRemove(pos, NumberTheory.numberOfDigits(number, numeralSystemBase));
+		}
+		/**
+		 * Digit at position - base 10 numeral system
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void DIGIT10(int pos) {
+			double number = getTokenValue(pos + 1);
+			double position = getTokenValue(pos + 2);
+			f2SetDecreaseRemove(pos, NumberTheory.digitAtPosition(number, position));
+		}
+		/**
+		 * Prime factor value
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void FACTVAL(int pos) {
+			double number = getTokenValue(pos + 1);
+			double id = getTokenValue(pos + 2);
+			f2SetDecreaseRemove(pos, NumberTheory.primeFactorValue(number, id));
+		}
+		/**
+		 * Prime factor value exponent
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void FACTEXP(int pos) {
+			double number = getTokenValue(pos + 1);
+			double id = getTokenValue(pos + 2);
+			f2SetDecreaseRemove(pos, NumberTheory.primeFactorExponent(number, id));
+		}
+		/**
+		 * Nth order root
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void ROOT(int pos) {
+			double n = getTokenValue(pos + 1);
+			double x = getTokenValue(pos + 2);
+			f2SetDecreaseRemove(pos, MathFunctions.root(n, x));
+		}
+		/**
 		 * IF function
 		 *
 		 * @param      pos                 the token position
@@ -2892,6 +3611,10 @@ namespace org.mariuszgromada.math.mxparser {
 			/*
 			 * Get condition string
 			 * 1st parameter
+			 * The goal is to avoid calculation
+			 * of not needed part of IF function
+			 * Example: If(1=1, 2, sin(3) ) - here sin(3) does not
+			 * require to be calculated.
 			 */
 			List<FunctionParameter> ifParams = getFunctionParameters(pos, tokensList);
 			FunctionParameter ifParam = ifParams[0];
@@ -2987,7 +3710,7 @@ namespace org.mariuszgromada.math.mxparser {
 		 *
 		 * @param      pos                 the token position
 		 */
-		private void CHI_ab(int pos) {
+		private void CHI(int pos) {
 			double x = getTokenValue(pos+1);
 			double a = getTokenValue(pos+2);
 			double b = getTokenValue(pos+3);
@@ -2998,33 +3721,33 @@ namespace org.mariuszgromada.math.mxparser {
 		 *
 		 * @param      pos                 the token position
 		 */
-		private void CHI_AB(int pos) {
+		private void CHI_LR(int pos) {
 			double x = getTokenValue(pos+1);
 			double a = getTokenValue(pos+2);
 			double b = getTokenValue(pos+3);
-			f3SetDecreaseRemove(pos, MathFunctions.CHi_LR(x, a, b) );
+			f3SetDecreaseRemove(pos, MathFunctions.chi_LR(x, a, b) );
 		}
 		/**
 		 * Characteristic function [a,b)
 		 *
 		 * @param      pos                 the token position
 		 */
-		private void CHI_Ab(int pos) {
+		private void CHI_L(int pos) {
 			double x = getTokenValue(pos+1);
 			double a = getTokenValue(pos+2);
 			double b = getTokenValue(pos+3);
-			f3SetDecreaseRemove(pos, MathFunctions.Chi_L(x, a, b) );
+			f3SetDecreaseRemove(pos, MathFunctions.chi_L(x, a, b) );
 		}
 		/**
 		 * Characteristic function (a,b]
 		 *
 		 * @param      pos                 the token position
 		 */
-		private void CHI_aB(int pos) {
+		private void CHI_R(int pos) {
 			double x = getTokenValue(pos + 1);
 			double a = getTokenValue(pos + 2);
 			double b = getTokenValue(pos + 3);
-			f3SetDecreaseRemove(pos, MathFunctions.cHi_R(x, a, b));
+			f3SetDecreaseRemove(pos, MathFunctions.chi_R(x, a, b));
 		}
 		/**
 		 * Probability Distribution Function - Uniform Continuous distribution
@@ -3091,6 +3814,17 @@ namespace org.mariuszgromada.math.mxparser {
 			double mean = getTokenValue(pos + 2);
 			double stddev = getTokenValue(pos + 3);
 			f3SetDecreaseRemove(pos, ProbabilityDistributions.qntNormal(q, mean, stddev));
+		}
+		/**
+		 * Digit at position - numeral system with given base
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void DIGIT(int pos) {
+			double number = getTokenValue(pos + 1);
+			double position = getTokenValue(pos + 2);
+			double numeralSystemBase = getTokenValue(pos + 3);
+			f3SetDecreaseRemove(pos, NumberTheory.digitAtPosition(number, position, numeralSystemBase));
 		}
 		/**
 		 * Updating missing tokens (i.e. indexes i sum operator). Used when creating
@@ -3304,15 +4038,21 @@ namespace org.mariuszgromada.math.mxparser {
 		 * @param      derivativeType      the type of derivative (LEFT, RIGHT, ...)
 		 */
 		private void DERIVATIVE(int pos, int derivativeType) {
+			/*
+			 * 2 params - der( f(x), x )
+			 * 3 params - der( f(x), x, x0 )
+			 * 4 params - der( f(x), x, eps, maxsteps )
+			 * 5 params - der( f(x), x, x0, eps, maxsteps )
+			 */
 			List<FunctionParameter> derParams = getFunctionParameters(pos, tokensList);
 			/*
 			 * Default epsilon
 			 */
-			const double DEF_EPS		= 1E-8;
+			const double DEF_EPS = 1E-8;
 			/*
 			 * Default max number of steps
 			 */
-			const int DEF_MAX_STEPS		= 20;
+			const int DEF_MAX_STEPS = 20;
 			/*
 			 * Get internal function strinng
 			 * 1th - parameter
@@ -3325,19 +4065,48 @@ namespace org.mariuszgromada.math.mxparser {
 			FunctionParameter xParam = derParams[1];
 			ArgumentParameter x = getParamArgument(xParam.paramStr);
 			if (x.presence == Argument.NOT_FOUND) {
-				updateMissingTokens(xParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID );
-				updateMissingTokens(funParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID );
+				updateMissingTokens(xParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+				updateMissingTokens(funParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
 			}
 			Expression funExp = new Expression(funParam.paramStr, funParam.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
-			double x0 = x.argument.getArgumentValue();
+			double x0 = Double.NaN;
+			/*
+			 * der( f(x), x )
+			 * der( f(x), x, eps, maxsteps )
+			 */
+			if ((derParams.Count == 2) || (derParams.Count == 4))
+				x0 = x.argument.getArgumentValue();
+			/*
+			 * der( f(x), x, x0 )
+			 * der( f(x), x, x0, eps, maxsteps )
+			 */
+			if ((derParams.Count == 3) || (derParams.Count == 5)) {
+				FunctionParameter x0Param = derParams[2];
+				if (x.presence == Argument.NOT_FOUND)
+					updateMissingTokens(x0Param.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+				Expression x0Expr = new Expression(x0Param.paramStr, x0Param.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
+				x0 = x0Expr.calculate();
+			}
 			double eps = DEF_EPS;
 			int maxSteps = DEF_MAX_STEPS;
-			if (derParams.Count == 4) {
-				FunctionParameter epsParam = derParams[2];
-				FunctionParameter maxStepsParam = derParams[3];
+			/*
+			 * der( f(x), x, eps, maxsteps )
+			 * der( f(x), x, x0, eps, maxsteps )
+			 */
+			if ((derParams.Count == 4) || (derParams.Count == 5)) {
+				FunctionParameter epsParam;
+				FunctionParameter maxStepsParam;
+				if (derParams.Count == 4) {
+					epsParam = derParams[2];
+					maxStepsParam = derParams[3];
+				}
+				else {
+					epsParam = derParams[3];
+					maxStepsParam = derParams[4];
+				}
 				if (x.presence == Argument.NOT_FOUND) {
-					updateMissingTokens(epsParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID );
-					updateMissingTokens(maxStepsParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID );
+					updateMissingTokens(epsParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+					updateMissingTokens(maxStepsParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
 				}
 				Expression epsExpr = new Expression(epsParam.paramStr, epsParam.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
 				Expression maxStepsExp = new Expression(maxStepsParam.paramStr, maxStepsParam.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
@@ -3347,10 +4116,12 @@ namespace org.mariuszgromada.math.mxparser {
 			if (derivativeType == Calculus.GENERAL_DERIVATIVE) {
 				double general = Calculus.derivative(funExp, x.argument, x0, Calculus.GENERAL_DERIVATIVE, eps, maxSteps);
 				calcSetDecreaseRemove(pos, general);
-			} else if (derivativeType == Calculus.LEFT_DERIVATIVE) {
+			}
+			else if (derivativeType == Calculus.LEFT_DERIVATIVE) {
 				double left = Calculus.derivative(funExp, x.argument, x0, Calculus.LEFT_DERIVATIVE, eps, maxSteps);
 				calcSetDecreaseRemove(pos, left);
-			} else {
+			}
+			else {
 				double right = Calculus.derivative(funExp, x.argument, x0, Calculus.RIGHT_DERIVATIVE, eps, maxSteps);
 				calcSetDecreaseRemove(pos, right);
 			}
@@ -3466,6 +4237,52 @@ namespace org.mariuszgromada.math.mxparser {
 			double eps = DEF_EPS;
 			int maxSteps = DEF_MAX_STEPS;
 			calcSetDecreaseRemove(pos, Calculus.integralTrapezoid(funExp, x.argument, aExp.calculate(), bExp.calculate(), eps, maxSteps) );
+			clearParamArgument(x);
+		}
+		/**
+		 * Function SOLVE
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void SOLVE(int pos) {
+			/**
+			 * Default epsilon
+			 */
+			const double DEF_EPS = 1E-9;
+			/*
+			 * Default max number of steps
+			 */
+			const int DEF_MAX_STEPS = 100;
+			List<FunctionParameter> intParams = getFunctionParameters(pos, tokensList);
+			/*
+			 * Get internal function strinng
+			 * 1th - parameter
+			 */
+			FunctionParameter funParam = intParams[0];
+			/*
+			 * Get argument
+			 * 2nd - parameter
+			 */
+			FunctionParameter xParam = intParams[1];
+			/*
+			 * Get <a,b>
+			 * 2nd - parameter
+			 */
+			FunctionParameter aParam = intParams[2];
+			FunctionParameter bParam = intParams[3];
+			ArgumentParameter x = getParamArgument(xParam.paramStr);
+			if (x.presence == Argument.NOT_FOUND) {
+				updateMissingTokens(xParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+				updateMissingTokens(funParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+				updateMissingTokens(aParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+				updateMissingTokens(bParam.tokens, xParam.paramStr, x.index, Argument.TYPE_ID);
+			}
+			Expression funExp = new Expression(funParam.paramStr, funParam.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
+			Expression aExp = new Expression(aParam.paramStr, aParam.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
+			Expression bExp = new Expression(bParam.paramStr, bParam.tokens, argumentsList, functionsList, constantsList, DISABLE_ULP_ROUNDING);
+			double eps = DEF_EPS;
+			int maxSteps = DEF_MAX_STEPS;
+			calcSetDecreaseRemove(pos, Calculus.solveBrent(funExp, x.argument, aExp.calculate(), bExp.calculate(), eps, maxSteps));
 			clearParamArgument(x);
 		}
 		/**
@@ -3634,6 +4451,96 @@ namespace org.mariuszgromada.math.mxparser {
 			variadicSetDecreaseRemove(pos, numbers[i], numbers.Count);
 		}
 		/**
+		 * Coalesce
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void COALESCE(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, MathFunctions.coalesce(mXparser.arrayList2double(numbers)), numbers.Count);
+		}
+		/**
+		 * OR_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void OR_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, BooleanAlgebra.orVariadic( mXparser.arrayList2double(numbers) ), numbers.Count );
+		}
+		/**
+		 * AND_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void AND_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, BooleanAlgebra.andVariadic( mXparser.arrayList2double(numbers) ), numbers.Count );
+		}
+		/**
+		 * XOR_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void XOR_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, BooleanAlgebra.xorVariadic( mXparser.arrayList2double(numbers) ), numbers.Count );
+		}
+		/**
+		 * ARGMIN_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void ARGMIN_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, NumberTheory.argmin(mXparser.arrayList2double(numbers)), numbers.Count );
+		}
+		/**
+		 * ARGMAX_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void ARGMAX_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, NumberTheory.argmax(mXparser.arrayList2double(numbers)), numbers.Count );
+		}
+		/**
+		 * MEDIAN_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void MEDIAN_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, Statistics.median(mXparser.arrayList2double(numbers)), numbers.Count );
+		}
+		/**
+		 * MODE_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void MODE_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, Statistics.mode(mXparser.arrayList2double(numbers)), numbers.Count );
+		}
+		/**
+		 * BASE_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void BASE_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, NumberTheory.convOthBase2Decimal(mXparser.arrayList2double(numbers)), numbers.Count );
+		}
+		/**
+		 * NDIST_VARIADIC
+		 *
+		 * @param      pos                 the token position
+		 */
+		private void NDIST_VARIADIC(int pos) {
+			List<Double> numbers = getNumbers(pos);
+			variadicSetDecreaseRemove(pos, NumberTheory.numberOfDistValues(mXparser.arrayList2double(numbers)), numbers.Count );
+		}
+		/**
 		 * Parser symbols
 		 * Removes comma
 		 *
@@ -3666,8 +4573,29 @@ namespace org.mariuszgromada.math.mxparser {
 		 *
 		 * @return     true if syntax is ok
 		 */
+		public bool checkLexSyntax() {
+			bool syntax = NO_SYNTAX_ERRORS;
+			recursionCallsCounter = 0;
+			#if PCL || NETSTANDARD
+				syntaxchecker.SyntaxChecker syn = new syntaxchecker.SyntaxChecker(new MemoryStream(Encoding.UTF8.GetBytes(expressionString)));
+			#else
+				syntaxchecker.SyntaxChecker syn = new syntaxchecker.SyntaxChecker(new MemoryStream(Encoding.ASCII.GetBytes(expressionString)));
+			#endif
+			try {
+				syn.checkSyntax();
+			} catch (Exception e) {
+				syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
+				errorMessage = "lexical error \n\n" + e.Message + "\n";
+			}
+			return syntax;
+		}
+		/**
+		 * Checks syntax of the expression string.
+		 *
+		 * @return     true if syntax is ok
+		 */
 		public bool checkSyntax() {
-			bool syntax = checkSyntax("[" + expressionString + "] ");
+			bool syntax = checkSyntax("[" + expressionString + "] ", false);
 			return syntax;
 		}
 		/**
@@ -3723,16 +4651,28 @@ namespace org.mariuszgromada.math.mxparser {
 		 * @return     true if syntax was correct,
 		 *             otherwise returns false.
 		 */
-		private bool checkSyntax(String level) {
-			if ( (expressionWasModified == false) && (syntaxStatus == NO_SYNTAX_ERRORS) ) {
+		private bool checkSyntax(String level, bool functionWithBodyExt) {
+			if ( (expressionWasModified == false) && (syntaxStatus == NO_SYNTAX_ERRORS) && (optionsChangesetNumber == mXparser.optionsChangesetNumber) ) {
 				errorMessage = level + "already checked - no errors!\n";
 				recursionCallPending = false;
+				return NO_SYNTAX_ERRORS;
+			}
+			optionsChangesetNumber = mXparser.optionsChangesetNumber;
+			if (functionWithBodyExt) {
+				syntaxStatus = NO_SYNTAX_ERRORS;
+				recursionCallPending = false;
+				expressionWasModified = false;
+				errorMessage = errorMessage + level + "function with extended body - assuming no errors.\n";
 				return NO_SYNTAX_ERRORS;
 			}
 			recursionCallPending = true;
 			errorMessage = level +"checking ...\n";
 			bool syntax = NO_SYNTAX_ERRORS;
-			syntaxchecker.SyntaxChecker syn = new syntaxchecker.SyntaxChecker(new MemoryStream(Encoding.ASCII.GetBytes(expressionString)) );
+			#if PCL || NETSTANDARD
+				syntaxchecker.SyntaxChecker syn = new syntaxchecker.SyntaxChecker(new MemoryStream(Encoding.UTF8.GetBytes(expressionString)));
+			#else
+				syntaxchecker.SyntaxChecker syn = new syntaxchecker.SyntaxChecker(new MemoryStream(Encoding.ASCII.GetBytes(expressionString)) );
+			#endif
 			try {
 				syn.checkSyntax();
 				/*
@@ -3770,7 +4710,7 @@ namespace org.mariuszgromada.math.mxparser {
 								errorMessage = errorMessage + level + tokenStr + "<ARGUMENT> was expected.\n";
 							} else
 								if ( (arg.argumentExpression != this) && (arg.argumentExpression.recursionCallPending == false) ) {
-									bool syntaxRec = arg.argumentExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + arg.argumentExpression.getExpressionString() + "] ");
+									bool syntaxRec = arg.argumentExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + arg.argumentExpression.getExpressionString() + "] ", false);
 									syntax = syntax && syntaxRec;
 									errorMessage = errorMessage + level + tokenStr + "checking dependent argument ...\n" + arg.argumentExpression.getErrorMessage();
 								}
@@ -3786,7 +4726,7 @@ namespace org.mariuszgromada.math.mxparser {
 							errorMessage = errorMessage + level + tokenStr + "<RECURSIVE_ARGUMENT> expecting 1 parameter.\n";
 						} else
 							if ( (arg.argumentExpression != this) && (arg.argumentExpression.recursionCallPending == false) ) {
-								bool syntaxRec = arg.argumentExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + arg.argumentExpression.getExpressionString() + "] ");
+								bool syntaxRec = arg.argumentExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + arg.argumentExpression.getExpressionString() + "] ", false);
 								syntax = syntax && syntaxRec;
 								errorMessage = errorMessage + level + tokenStr + "checking recursive argument ...\n" + arg.argumentExpression.getErrorMessage();
 							}
@@ -3794,7 +4734,7 @@ namespace org.mariuszgromada.math.mxparser {
 					/*
 					 * Check syntax for "NOT RECOGNIZED" token
 					 */
-					if (t.tokenTypeId == ConstantValue.NaN) {
+					if (t.tokenTypeId == Token.NOT_MATCHED) {
 						bool calculusToken = false;
 						foreach (SyntaxStackElement e in syntaxStack)
 							if ( e.tokenStr.Equals(t.tokenStr) )
@@ -3815,7 +4755,11 @@ namespace org.mariuszgromada.math.mxparser {
 							errorMessage = errorMessage + level + tokenStr + "<USER_DEFINED_FUNCTION> expecting " + fun.getParametersNumber() + " arguments.\n";
 						} else
 							if ( (fun.functionExpression != this) && (fun.functionExpression.recursionCallPending == false) ) {
-								bool syntaxRec = fun.functionExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + fun.functionExpression.getExpressionString() + "] ");
+								bool syntaxRec;
+								if (fun.getFunctionBodyType() == Function.BODY_RUNTIME)
+									syntaxRec = fun.functionExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + fun.functionExpression.getExpressionString() + "] ", false);
+								else
+									syntaxRec = fun.functionExpression.checkSyntax(level + "-> " + "[" + t.tokenStr + "] = [" + fun.functionExpression.getExpressionString() + "] ", true);
 								syntax = syntax && syntaxRec;
 								errorMessage = errorMessage + level + tokenStr + "checking user defined function ...\n" + fun.functionExpression.getErrorMessage();
 							}
@@ -3873,15 +4817,32 @@ namespace org.mariuszgromada.math.mxparser {
 						List<FunctionParameter> funParams = null;
 						if (paramsNumber > 0)
 							funParams = getFunctionParameters(tokenIndex, initialTokens);
-						if ( (t.tokenId == CalculusOperator.DER_ID) || (t.tokenId == CalculusOperator.DER_LEFT_ID) || (t.tokenId == CalculusOperator.DER_RIGHT_ID) )  {
-							if ( (paramsNumber !=2) && (paramsNumber != 4) ) {
+						if ((t.tokenId == CalculusOperator.DER_ID) || (t.tokenId == CalculusOperator.DER_LEFT_ID) || (t.tokenId == CalculusOperator.DER_RIGHT_ID)) {
+							if ((paramsNumber < 2) || (paramsNumber > 5)) {
 								syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
-								errorMessage = errorMessage + level + tokenStr + "<DERIVATIVE> expecting 2 or 4 calculus arguments.\n";
-							} else {
-								FunctionParameter argParam = funParams[1];
-								if ( checkIfKnownArgument(argParam) == false) {
-									syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
-									errorMessage = errorMessage + level + tokenStr + "<DERIVATIVE> argument was expected.\n";
+								errorMessage = errorMessage + level + tokenStr + "<DERIVATIVE> expecting 2 or 3 or 4 or 5 calculus parameters.\n";
+							}
+							else {
+								if ((paramsNumber == 2) || (paramsNumber == 4)) {
+									FunctionParameter argParam = funParams[1];
+									if (checkIfKnownArgument(argParam) == false) {
+										syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
+										errorMessage = errorMessage + level + tokenStr + "<DERIVATIVE> argument was expected.\n";
+									}
+								}
+								else {
+									FunctionParameter argParam = funParams[1];
+									stackElement = new SyntaxStackElement(argParam.paramStr, t.tokenLevel + 1);
+									syntaxStack.Push(stackElement);
+									int errors = checkCalculusParameter(stackElement.tokenStr);
+									if (errors > 0) {
+										syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
+										errorMessage = errorMessage + level + tokenStr + "<DERIVATIVE> Found duplicated key words for calculus parameter " + "(" + stackElement.tokenStr + ", " + errors + ").\n";
+									}
+									if (!checkIfKnownArgument(argParam) && !checkIfUnknownToken(argParam)) {
+										syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
+										errorMessage = errorMessage + level + tokenStr + "<DERIVATIVE> One token (argument or unknown) was expected.\n";
+									}
 								}
 							}
 						}
@@ -3897,10 +4858,11 @@ namespace org.mariuszgromada.math.mxparser {
 								}
 							}
 						}
-						if (t.tokenId == CalculusOperator.INT_ID) {
+						if ((t.tokenId == CalculusOperator.INT_ID) ||
+								(t.tokenId == CalculusOperator.SOLVE_ID)) {
 							if (paramsNumber !=4) {
 								syntax = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
-								errorMessage = errorMessage + level + tokenStr + "<INTEGRAL> expecting 4 calculus arguments.\n";
+								errorMessage = errorMessage + level + tokenStr + "<INTEGRAL/SOLVE> expecting 4 calculus arguments.\n";
 							} else {
 								FunctionParameter argParam = funParams[1];
 								stackElement = new SyntaxStackElement(argParam.paramStr, t.tokenLevel+1);
@@ -4014,14 +4976,66 @@ namespace org.mariuszgromada.math.mxparser {
 			 */
 			if ((expressionWasModified == true) || (syntaxStatus != NO_SYNTAX_ERRORS))
 				syntaxStatus = checkSyntax();
-			if (syntaxStatus == SYNTAX_ERROR_OR_STATUS_UNKNOWN)
+			if (syntaxStatus == SYNTAX_ERROR_OR_STATUS_UNKNOWN) {
+				/*
+				 * Recursive counter to avoid infinite loops in expressions
+				 * created in they way shown in below examples
+				 *
+				 * Argument x = new Argument("x = 2*y");
+				 * Argument y = new Argument("y = 2*x");
+				 * x.addDefinitions(y);
+				 * y.addDefinitions(x);
+				 *
+				 * Function f = new Function("f(x) = 2*g(x)");
+				 * Function g = new Function("g(x) = 2*f(x)");
+				 * f.addDefinitions(g);
+				 * g.addDefinitions(f);
+				 *
+				 */
+				recursionCallsCounter = 0;
 				return Double.NaN;
-			copyInitialTokens();
+			}
+			/*
+			 * Building initial tokens only if this is first recursion call
+			 * or we have expression clone, helps to solve problem with
+			 * definitions similar to the below example
+			 *
+			 *
+			 * Function f = new Function("f(x) = 2*g(x)");
+			 * Function g = new Function("g(x) = 2*f(x)");
+			 * f.addDefinitions(g);
+			 * g.addDefinitions(f);
+			 */
+			if ((recursionCallsCounter == 0) || (internalClone))
+				copyInitialTokens();
 			/*
 			 * if nothing to calculate return Double.NaN
 			 */
-			if (tokensList.Count == 0)
+			if (tokensList.Count == 0) {
+				recursionCallsCounter = 0;
 				return Double.NaN;
+			}
+			/*
+			 * Incrementing recursive counter to avoid infinite loops in expressions
+			 * created in they way shown in below examples
+			 *
+			 * Argument x = new Argument("x = 2*y");
+			 * Argument y = new Argument("y = 2*x");
+			 * x.addDefinitions(y);
+			 * y.addDefinitions(x);
+			 *
+			 * Function f = new Function("f(x) = 2*g(x)");
+			 * Function g = new Function("g(x) = 2*f(x)");
+			 * f.addDefinitions(g);
+			 * g.addDefinitions(f);
+			 *
+			 */
+			if (recursionCallsCounter >= mXparser.MAX_RECURSION_CALLS) {
+				recursionCallsCounter = 0;
+				this.errorMessage = errorMessage + "\n" + "[" + description + "][" + expressionString + "] " + "Maximum recursion calls reached.\n";
+				return Double.NaN;
+			}
+			recursionCallsCounter++;
 			/*
 			 * position for particular tokens types
 			 */
@@ -4029,6 +5043,7 @@ namespace org.mariuszgromada.math.mxparser {
 			int ifPos;
 			int iffPos;
 			int variadicFunPos;
+			int depArgPos;
 			int recArgPos;
 			int f3ArgPos;
 			int f2ArgPos;
@@ -4042,6 +5057,7 @@ namespace org.mariuszgromada.math.mxparser {
 			int powerNum;
 			int factPos;
 			int modPos;
+			int percPos;
 			int negPos;
 			int bolPos;
 			int eqPos;
@@ -4053,7 +5069,12 @@ namespace org.mariuszgromada.math.mxparser {
 			int commaPos;
 			int lParPos;
 			int rParPos;
+			int bitwisePos;
+			int bitwiseComplPos;
 			Token token;
+			Token tokenL;
+			Token tokenR;
+			Argument argument;
 			int tokensNumber;
 			int maxPartLevel;
 			int lPos;
@@ -4078,6 +5099,7 @@ namespace org.mariuszgromada.math.mxparser {
 				iffPos = -1;
 				variadicFunPos = -1;
 				recArgPos = -1;
+				depArgPos = -1;
 				f3ArgPos = -1;
 				f2ArgPos = -1;
 				f1ArgPos = -1;
@@ -4089,6 +5111,7 @@ namespace org.mariuszgromada.math.mxparser {
 				powerPos = -1;
 				factPos = -1;
 				modPos = -1;
+				percPos = -1;
 				powerNum = 0;
 				negPos = -1;
 				bolPos = -1;
@@ -4101,35 +5124,18 @@ namespace org.mariuszgromada.math.mxparser {
 				commaPos = -1;
 				lParPos = -1;
 				rParPos = -1;
+				bitwisePos = -1;
+				bitwiseComplPos = -1;
 				tokensNumber = tokensList.Count;
-				/* calculus operations ... */
+				/* calculus or if or iff operations ... */
 				p = -1;
 				do {
 					p++;
 					token = tokensList[p];
-					if (token.tokenTypeId == CalculusOperator.TYPE_ID)
-						calculusPos = p;
-				} while ((p < tokensNumber - 1) && (calculusPos < 0));
-				/* if operations ... */
-				if (calculusPos < 0) {
-					p = -1;
-					do {
-						p++;
-						token = tokensList[p];
-						if ((token.tokenTypeId == Function3Arg.TYPE_ID) && (token.tokenId == Function3Arg.IF_CONDITION_ID))
-							ifPos = p;
-					} while ((p < tokensNumber - 1) && (ifPos < 0));
-				}
-				/* iff operations ... */
-				if ((calculusPos < 0) && (ifPos < 0)) {
-					p = -1;
-					do {
-						p++;
-						token = tokensList[p];
-						if ((token.tokenTypeId == FunctionVariadic.TYPE_ID) && (token.tokenId == FunctionVariadic.IFF_ID))
-							iffPos = p;
-					} while ((p < tokensNumber - 1) && (iffPos < 0));
-				}
+					if (token.tokenTypeId == CalculusOperator.TYPE_ID) calculusPos = p;
+					else if ((token.tokenTypeId == Function3Arg.TYPE_ID) && (token.tokenId == Function3Arg.IF_CONDITION_ID)) ifPos = p;
+					else if ((token.tokenTypeId == FunctionVariadic.TYPE_ID) && (token.tokenId == FunctionVariadic.IFF_ID)) iffPos = p;
+				} while ((p < tokensNumber - 1) && (calculusPos < 0) && (ifPos < 0) && (iffPos < 0));
 				if ((calculusPos < 0) && (ifPos < 0) && (iffPos < 0)) {
 					/* Find start index of the tokens with the highest level */
 					for (tokenIndex = 0; tokenIndex < tokensNumber; tokenIndex++) {
@@ -4138,121 +5144,195 @@ namespace org.mariuszgromada.math.mxparser {
 							maxPartLevel = tokensList[tokenIndex].tokenLevel;
 							lPos = tokenIndex;
 						}
-						if (token.tokenTypeId == Argument.TYPE_ID)
-							ARGUMENT(tokenIndex);
-						else if (token.tokenTypeId == ConstantValue.TYPE_ID)
+						if (token.tokenTypeId == Argument.TYPE_ID) {
+							argument = argumentsList[ tokensList[tokenIndex].tokenId ];
+							/*
+							 * Only free arguments can be directly
+							 * replaced with numbers. This is in order to
+							 * avoid tokensList change in possible
+							 * recursive calls from dependent arguments
+							 * as dependent arguments will not work
+							 * on argument clones. Here we are also checking
+							 * if there is dependent argument in expression.
+							 */
+							if (argument.argumentType == Argument.FREE_ARGUMENT)
+								FREE_ARGUMENT(tokenIndex);
+							else
+								depArgPos = tokenIndex;
+						} else if (token.tokenTypeId == ConstantValue.TYPE_ID)
 							CONSTANT(tokenIndex);
+						else if (token.tokenTypeId == Unit.TYPE_ID)
+							UNIT(tokenIndex);
 						else if (token.tokenTypeId == Constant.TYPE_ID)
 							USER_CONSTANT(tokenIndex);
 						else if (token.tokenTypeId == RandomVariable.TYPE_ID)
 							RANDOM_VARIABLE(tokenIndex);
 					}
-					tokenIndex = lPos;
-					/* Find end index of the tokens with the highest level */
-					while ((tokenIndex < tokensNumber) && (maxPartLevel == tokensList[tokenIndex].tokenLevel))
-						tokenIndex++;
-					rPos = tokenIndex - 1;
-					if (verboseMode == true) {
-						printSystemInfo("Parsing (" + lPos + ", " + rPos + ") ", WITH_EXP_STR);
-						showParsing(lPos, rPos);
-					}
-					/* if no calculus operations were found
-					 * check for other tokens
-					 */
-					for (pos = lPos; pos <= rPos; pos++) {
-						token = tokensList[pos];
-						if ((token.tokenTypeId == RecursiveArgument.TYPE_ID_RECURSIVE) && (recArgPos < 0))
-							recArgPos = pos;
-						else
-						if ((token.tokenTypeId == FunctionVariadic.TYPE_ID) && (variadicFunPos < 0))
-							variadicFunPos = pos;
-						else
-						if ((token.tokenTypeId == Function3Arg.TYPE_ID) && (f3ArgPos < 0))
-							f3ArgPos = pos;
-						else
-						if ((token.tokenTypeId == Function2Arg.TYPE_ID) && (f2ArgPos < 0))
-							f2ArgPos = pos;
-						else
-						if ((token.tokenTypeId == Function1Arg.TYPE_ID) && (f1ArgPos < 0))
-							f1ArgPos = pos;
-						else
-						if ((token.tokenTypeId == Function.TYPE_ID) && (userFunPos < 0))
-							userFunPos = pos;
-						else
-						if (token.tokenTypeId == Operator.TYPE_ID) {
-							if (token.tokenId == Operator.POWER_ID) {
-								powerPos = pos;
-								powerNum++;
-							} else
-						if ((token.tokenId == Operator.FACT_ID) && (factPos < 0)) {
-								factPos = pos;
-							} else
-							if ((token.tokenId == Operator.MOD_ID) && (modPos < 0)) {
-								modPos = pos;
-							} else
-							if ((token.tokenId == Operator.PLUS_ID) && (plusPos < 0))
-								plusPos = pos;
-							else
-							if ((token.tokenId == Operator.MINUS_ID) && (minusPos < 0))
-								minusPos = pos;
-							else
-							if ((token.tokenId == Operator.MULTIPLY_ID) && (multiplyPos < 0))
-								multiplyPos = pos;
-							else
-							if ((token.tokenId == Operator.DIVIDE_ID) && (dividePos < 0))
-								dividePos = pos;
-						} else
-						if ((token.tokenTypeId == BooleanOperator.TYPE_ID) && (token.tokenId == BooleanOperator.NEG_ID) && (negPos < 0)) {
-							negPos = pos;
-						} else
-						if ((token.tokenTypeId == BooleanOperator.TYPE_ID) && (bolPos < 0)) {
-							bolPos = pos;
-						} else
-						if (token.tokenTypeId == BinaryRelation.TYPE_ID) {
-							if ((token.tokenId == BinaryRelation.EQ_ID) && (eqPos < 0))
-								eqPos = pos;
-							else
-							if ((token.tokenId == BinaryRelation.NEQ_ID) && (neqPos < 0))
-								neqPos = pos;
-							else
-							if ((token.tokenId == BinaryRelation.LT_ID) && (ltPos < 0))
-								ltPos = pos;
-							else
-							if ((token.tokenId == BinaryRelation.GT_ID) && (gtPos < 0))
-								gtPos = pos;
-							else
-							if ((token.tokenId == BinaryRelation.LEQ_ID) && (leqPos < 0))
-								leqPos = pos;
-							else
-							if ((token.tokenId == BinaryRelation.GEQ_ID) && (geqPos < 0))
-								geqPos = pos;
-						} else
-						if (token.tokenTypeId == ParserSymbol.TYPE_ID) {
-							if ((token.tokenId == ParserSymbol.COMMA_ID)) {
-								if (commaPos < 0)
-									commas = new List<int>();
-								commas.Add(pos);
-								commaPos = pos;
-							} else
-							if ((token.tokenId == ParserSymbol.LEFT_PARENTHESES_ID) && (lParPos < 0))
-								lParPos = pos;
-							else
-							if ((token.tokenId == ParserSymbol.RIGHT_PARENTHESES_ID) && (rParPos < 0))
-								rParPos = pos;
-						}
-					}
 					/*
-					 * powering should be done using backwards sequence
+					 * If dependent argument was found then dependent arguments
+					 * in the tokensList need to replaced one after another in
+					 * separate loops as tokensList might change in some other
+					 * call done in possible recursive call.
+					 *
+					 * Argument x = new Argument("x = 2*y");
+					 * Argument y = new Argument("y = 2*x");
+					 * x.addDefinitions(y);
+					 * y.addDefinitions(x);
 					 */
-					if (powerNum > 1) {
-						powerPos = -1;
-						p = rPos + 1;
+					if (depArgPos >= 0) {
+						bool depArgFound;
 						do {
-							p--;
-							token = tokensList[p];
-							if ((token.tokenTypeId == Operator.TYPE_ID) && (token.tokenId == Operator.POWER_ID))
-								powerPos = p;
-						} while ((p > lPos) && (powerPos == -1));
+							depArgFound = false;
+							int currentTokensNumber = tokensList.Count;
+							for (tokenIndex = 0; tokenIndex < currentTokensNumber; tokenIndex++) {
+								token = tokensList[tokenIndex];
+								if (token.tokenTypeId == Argument.TYPE_ID) {
+									argument = argumentsList[tokensList[tokenIndex].tokenId];
+									if (argument.argumentType == Argument.DEPENDENT_ARGUMENT) {
+										DEPENDENT_ARGUMENT(tokenIndex);
+										depArgFound = true;
+										break;
+									}
+								}
+							}
+						} while (depArgFound);
+					}
+					else {
+						tokenIndex = lPos;
+						/* Find end index of the tokens with the highest level */
+						while ((tokenIndex < tokensNumber) && (maxPartLevel == tokensList[tokenIndex].tokenLevel))
+							tokenIndex++;
+						rPos = tokenIndex - 1;
+						if (verboseMode == true) {
+							printSystemInfo("Parsing (" + lPos + ", " + rPos + ") ", WITH_EXP_STR);
+							showParsing(lPos, rPos);
+						}
+						/* if no calculus operations were found
+						 * check for other tokens
+						 */
+						bool leftIsNUmber;
+						bool rigthIsNUmber;
+						for (pos = lPos; pos <= rPos; pos++) {
+							leftIsNUmber = false;
+							rigthIsNUmber = false;
+							token = tokensList[pos];
+							if (pos - 1 >= 0) {
+								tokenL = tokensList[pos - 1];
+								if (tokenL.tokenTypeId == ParserSymbol.NUMBER_TYPE_ID) leftIsNUmber = true;
+							}
+							if (pos + 1 < tokensNumber) {
+								tokenR = tokensList[pos + 1];
+								if (tokenR.tokenTypeId == ParserSymbol.NUMBER_TYPE_ID) rigthIsNUmber = true;
+							}
+							if ((token.tokenTypeId == RecursiveArgument.TYPE_ID_RECURSIVE) && (recArgPos < 0))
+								recArgPos = pos;
+							else
+							if ((token.tokenTypeId == FunctionVariadic.TYPE_ID) && (variadicFunPos < 0))
+								variadicFunPos = pos;
+							else
+							if ((token.tokenTypeId == Function3Arg.TYPE_ID) && (f3ArgPos < 0))
+								f3ArgPos = pos;
+							else
+							if ((token.tokenTypeId == Function2Arg.TYPE_ID) && (f2ArgPos < 0))
+								f2ArgPos = pos;
+							else
+							if ((token.tokenTypeId == Function1Arg.TYPE_ID) && (f1ArgPos < 0))
+								f1ArgPos = pos;
+							else
+							if ((token.tokenTypeId == Function.TYPE_ID) && (userFunPos < 0))
+								userFunPos = pos;
+							else
+							if (token.tokenTypeId == Operator.TYPE_ID) {
+								if ((token.tokenId == Operator.POWER_ID) && (leftIsNUmber && rigthIsNUmber)) {
+									powerPos = pos;
+									powerNum++;
+								} else
+								if ((token.tokenId == Operator.FACT_ID) && (factPos < 0) && (leftIsNUmber)) {
+									factPos = pos;
+								} else
+								if ((token.tokenId == Operator.PERC_ID) && (percPos < 0) && (leftIsNUmber)) {
+									percPos = pos;
+								} else
+								if ((token.tokenId == Operator.MOD_ID) && (modPos < 0) && (leftIsNUmber && rigthIsNUmber)) {
+									modPos = pos;
+								} else
+								if ((token.tokenId == Operator.PLUS_ID) && (plusPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									plusPos = pos;
+								else
+								if ((token.tokenId == Operator.MINUS_ID) && (minusPos < 0) && (rigthIsNUmber))
+									minusPos = pos;
+								else
+								if ((token.tokenId == Operator.MULTIPLY_ID) && (multiplyPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									multiplyPos = pos;
+								else
+								if ((token.tokenId == Operator.DIVIDE_ID) && (dividePos < 0) && (leftIsNUmber && rigthIsNUmber))
+									dividePos = pos;
+							}
+							else
+							if ((token.tokenTypeId == BooleanOperator.TYPE_ID) && (token.tokenId == BooleanOperator.NEG_ID) && (negPos < 0) && (rigthIsNUmber)) {
+								negPos = pos;
+							}
+							else
+							if ((token.tokenTypeId == BooleanOperator.TYPE_ID) && (bolPos < 0) && (leftIsNUmber && rigthIsNUmber)) {
+								bolPos = pos;
+							}
+							else
+							if (token.tokenTypeId == BinaryRelation.TYPE_ID) {
+								if ((token.tokenId == BinaryRelation.EQ_ID) && (eqPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									eqPos = pos;
+								else
+								if ((token.tokenId == BinaryRelation.NEQ_ID) && (neqPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									neqPos = pos;
+								else
+								if ((token.tokenId == BinaryRelation.LT_ID) && (ltPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									ltPos = pos;
+								else
+								if ((token.tokenId == BinaryRelation.GT_ID) && (gtPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									gtPos = pos;
+								else
+								if ((token.tokenId == BinaryRelation.LEQ_ID) && (leqPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									leqPos = pos;
+								else
+								if ((token.tokenId == BinaryRelation.GEQ_ID) && (geqPos < 0) && (leftIsNUmber && rigthIsNUmber))
+									geqPos = pos;
+							}
+							else
+							if (token.tokenTypeId == BitwiseOperator.TYPE_ID) {
+								if ((token.tokenId == BitwiseOperator.COMPL_ID) && (bitwiseComplPos < 0) && (rigthIsNUmber))
+									bitwiseComplPos = pos;
+								else
+								if ((bitwisePos < 0) && (leftIsNUmber && rigthIsNUmber))
+									bitwisePos = pos;
+							}
+							else
+							if (token.tokenTypeId == ParserSymbol.TYPE_ID) {
+								if ((token.tokenId == ParserSymbol.COMMA_ID)) {
+									if (commaPos < 0)
+										commas = new List<int>();
+									commas.Add(pos);
+									commaPos = pos;
+								}
+								else
+								if ((token.tokenId == ParserSymbol.LEFT_PARENTHESES_ID) && (lParPos < 0))
+									lParPos = pos;
+								else
+								if ((token.tokenId == ParserSymbol.RIGHT_PARENTHESES_ID) && (rParPos < 0))
+									rParPos = pos;
+							}
+						}
+						/*
+						 * powering should be done using backwards sequence
+						 */
+						if (powerNum > 1) {
+							powerPos = -1;
+							p = rPos + 1;
+							do {
+								p--;
+								token = tokensList[p];
+								if ((token.tokenTypeId == Operator.TYPE_ID) && (token.tokenId == Operator.POWER_ID))
+									powerPos = p;
+							} while ((p > lPos) && (powerPos == -1));
+						}
 					}
 				}
 				/* calculus operations */
@@ -4263,7 +5343,7 @@ namespace org.mariuszgromada.math.mxparser {
 				} else
 				if (iffPos >= 0) {
 					IFF(iffPos);
-				} else				/* ... arguments ... */
+				} else	/* ... arguments ... */
 				/* ... recursive arguments ... */
 				if (recArgPos >= 0) {
 					RECURSIVE_ARGUMENT(recArgPos);
@@ -4291,11 +5371,17 @@ namespace org.mariuszgromada.math.mxparser {
 				if (factPos >= 0) {
 					FACT(factPos);
 				} else
+				if (percPos >= 0) {
+					PERC(percPos);
+				} else
 				if (modPos >= 0) {
 					MODULO(modPos);
 				} else
 				if (negPos >= 0) {
 					NEG(negPos);
+				} else
+				if (bitwiseComplPos >= 0) {
+					BITWISE_COMPL(bitwiseComplPos);
 				} else
 				/* ... arithmetical operators  ... */
 				if ((multiplyPos >= 0) || (dividePos >= 0)) {
@@ -4348,10 +5434,13 @@ namespace org.mariuszgromada.math.mxparser {
 				/* ... logical operators  ... */
 				if (bolPos >= 0) bolCalc(bolPos);
 				else
+				/* ... bitwise operators  ... */
+				if (bitwisePos >= 0) bitwiseCalc(bitwisePos);
+				else
 				if ((lParPos >= 0) && (rParPos > lParPos)) {
 					PARENTHESES(lParPos, rParPos);
 				} else if (tokensList.Count > 1) {
-					this.errorMessage = errorMessage + "\n" + "[" + description + "][" + expressionString + "] " + "Fatal error - not know what to do with tokens while calculate().";
+					this.errorMessage = errorMessage + "\n" + "[" + description + "][" + expressionString + "] " + "Fatal error - not know what to do with tokens while calculate().\n";
 				}
 				if (verboseMode == true) {
 					showParsing(0, tokensList.Count - 1);
@@ -4367,7 +5456,12 @@ namespace org.mariuszgromada.math.mxparser {
 			}
 			long endTime = mXparser.currentTimeMillis();
 			computingTime = (endTime - startTime) / 1000.0;
-			return tokensList[0].tokenValue;
+			recursionCallsCounter = 0;
+			double result = tokensList[0].tokenValue;
+			double resultint = Math.Round(result);
+			if (MathFunctions.abs(result - resultint) <= BinaryRelations.getEpsilon())
+				result = resultint;
+			return result;
 		}
 		/**
 		 * Calculates unary function
@@ -4425,6 +5519,12 @@ namespace org.mariuszgromada.math.mxparser {
 			case Function1Arg.GAUSS_ERF_INV_ID: GAUSS_ERF_INV(pos); break;
 			case Function1Arg.GAUSS_ERFC_INV_ID: GAUSS_ERFC_INV(pos); break;
 			case Function1Arg.ULP_ID: ULP(pos); break;
+			case Function1Arg.ISNAN_ID: ISNAN(pos); break;
+			case Function1Arg.NDIG10_ID: NDIG10(pos); break;
+			case Function1Arg.NFACT_ID: NFACT(pos); break;
+			case Function1Arg.ARCSEC_ID: ARCSEC(pos); break;
+			case Function1Arg.ARCCSC_ID: ARCCSC(pos); break;
+			case Function1Arg.GAMMA_ID: GAMMA(pos); break;
 			}
 		}
 		/**
@@ -4448,6 +5548,11 @@ namespace org.mariuszgromada.math.mxparser {
 			case Function2Arg.RND_UNIFORM_DISCR_ID: RND_VAR_UNIFORM_DISCR(pos); break;
 			case Function2Arg.ROUND_ID: ROUND(pos); break;
 			case Function2Arg.RND_NORMAL_ID: RND_NORMAL(pos); break;
+			case Function2Arg.NDIG_ID: NDIG(pos); break;
+			case Function2Arg.DIGIT10_ID: DIGIT10(pos); break;
+			case Function2Arg.FACTVAL_ID: FACTVAL(pos); break;
+			case Function2Arg.FACTEXP_ID: FACTEXP(pos); break;
+			case Function2Arg.ROOT_ID: ROOT(pos); break;
 			}
 		}
 		/**
@@ -4457,16 +5562,17 @@ namespace org.mariuszgromada.math.mxparser {
 		private void f3ArgCalc(int pos) {
 			switch (tokensList[pos].tokenId) {
 			case Function3Arg.IF_ID: IF(pos); break;
-			case Function3Arg.CHI_ab_ID: CHI_ab(pos); break;
-			case Function3Arg.CHI_AB_ID: CHI_AB(pos); break;
-			case Function3Arg.CHI_Ab_ID: CHI_Ab(pos); break;
-			case Function3Arg.CHI_aB_ID: CHI_aB(pos); break;
+			case Function3Arg.CHI_ID: CHI(pos); break;
+			case Function3Arg.CHI_LR_ID: CHI_LR(pos); break;
+			case Function3Arg.CHI_L_ID: CHI_L(pos); break;
+			case Function3Arg.CHI_R_ID: CHI_R(pos); break;
 			case Function3Arg.PDF_UNIFORM_CONT_ID: PDF_UNIFORM_CONT(pos); break;
 			case Function3Arg.CDF_UNIFORM_CONT_ID: CDF_UNIFORM_CONT(pos); break;
 			case Function3Arg.QNT_UNIFORM_CONT_ID: QNT_UNIFORM_CONT(pos); break;
 			case Function3Arg.PDF_NORMAL_ID: PDF_NORMAL(pos); break;
 			case Function3Arg.CDF_NORMAL_ID: CDF_NORMAL(pos); break;
 			case Function3Arg.QNT_NORMAL_ID: QNT_NORMAL(pos); break;
+			case Function3Arg.DIGIT_ID: DIGIT(pos); break;
 			}
 		}
 		/**
@@ -4488,6 +5594,16 @@ namespace org.mariuszgromada.math.mxparser {
 			case FunctionVariadic.GCD_ID: GCD(pos); break;
 			case FunctionVariadic.LCM_ID: LCM(pos); break;
 			case FunctionVariadic.RND_LIST_ID: RND_LIST(pos); break;
+			case FunctionVariadic.COALESCE_ID: COALESCE(pos); break;
+			case FunctionVariadic.OR_ID: OR_VARIADIC(pos); break;
+			case FunctionVariadic.AND_ID: AND_VARIADIC(pos); break;
+			case FunctionVariadic.XOR_ID: XOR_VARIADIC(pos); break;
+			case FunctionVariadic.ARGMIN_ID: ARGMIN_VARIADIC(pos); break;
+			case FunctionVariadic.ARGMAX_ID: ARGMAX_VARIADIC(pos); break;
+			case FunctionVariadic.MEDIAN_ID: MEDIAN_VARIADIC(pos); break;
+			case FunctionVariadic.MODE_ID: MODE_VARIADIC(pos); break;
+			case FunctionVariadic.BASE_ID: BASE_VARIADIC(pos); break;
+			case FunctionVariadic.NDIST_ID: NDIST_VARIADIC(pos); break;
 			}
 		}
 		/**
@@ -4504,6 +5620,7 @@ namespace org.mariuszgromada.math.mxparser {
 			case CalculusOperator.VAR_ID: VAR(pos); break;
 			case CalculusOperator.STD_ID: STD(pos); break;
 			case CalculusOperator.INT_ID: INTEGRAL(pos); break;
+			case CalculusOperator.SOLVE_ID: SOLVE(pos); break;
 			case CalculusOperator.DER_ID: DERIVATIVE(pos, Calculus.GENERAL_DERIVATIVE); break;
 			case CalculusOperator.DER_LEFT_ID: DERIVATIVE(pos, Calculus.LEFT_DERIVATIVE); break;
 			case CalculusOperator.DER_RIGHT_ID: DERIVATIVE(pos, Calculus.RIGHT_DERIVATIVE); break;
@@ -4530,6 +5647,19 @@ namespace org.mariuszgromada.math.mxparser {
 			case BooleanOperator.XOR_ID: XOR(pos); break;
 			}
 		}
+		/**
+		 * Calculates Bitwise operators
+		 * @param pos
+		 */
+		private void bitwiseCalc(int pos) {
+			switch (tokensList[pos].tokenId) {
+			case BitwiseOperator.AND_ID: BITWISE_AND(pos); break;
+			case BitwiseOperator.OR_ID: BITWISE_OR(pos); break;
+			case BitwiseOperator.XOR_ID: BITWISE_XOR(pos); break;
+			case BitwiseOperator.LEFT_SHIFT_ID: BITWISE_LEFT_SHIFT(pos); break;
+			case BitwiseOperator.RIGHT_SHIFT_ID: BITWISE_RIGHT_SHIFT(pos); break;
+			}
+		}
 		/*=================================================
 		 *
 		 * Parser methods
@@ -4543,298 +5673,499 @@ namespace org.mariuszgromada.math.mxparser {
 			/*
 			 * Operators key words
 			 */
-			addKeyWord(Operator.PLUS_STR, Operator.PLUS_DESC, Operator.PLUS_ID, Operator.TYPE_ID);
-			addKeyWord(Operator.MINUS_STR, Operator.MINUS_DESC, Operator.MINUS_ID, Operator.TYPE_ID);
-			addKeyWord(Operator.MULTIPLY_STR, Operator.MULTIPLY_DESC, Operator.MULTIPLY_ID, Operator.TYPE_ID);
-			addKeyWord(Operator.DIVIDE_STR, Operator.DIVIDE_DESC, Operator.DIVIDE_ID, Operator.TYPE_ID);
-			addKeyWord(Operator.POWER_STR, Operator.POWER_DESC, Operator.POWER_ID, Operator.TYPE_ID);
-			addKeyWord(Operator.FACT_STR, Operator.FACT_DESC, Operator.FACT_ID, Operator.TYPE_ID);
-			addKeyWord(Operator.MOD_STR, Operator.MOD_DESC, Operator.MOD_ID, Operator.TYPE_ID);
+			addKeyWord(Operator.PLUS_STR, Operator.PLUS_DESC, Operator.PLUS_ID, Operator.PLUS_SYN, Operator.PLUS_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.MINUS_STR, Operator.MINUS_DESC, Operator.MINUS_ID, Operator.MINUS_SYN, Operator.MINUS_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.MULTIPLY_STR, Operator.MULTIPLY_DESC, Operator.MULTIPLY_ID, Operator.MULTIPLY_SYN, Operator.MULTIPLY_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.DIVIDE_STR, Operator.DIVIDE_DESC, Operator.DIVIDE_ID, Operator.DIVIDE_SYN, Operator.DIVIDE_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.POWER_STR, Operator.POWER_DESC, Operator.POWER_ID, Operator.POWER_SYN, Operator.POWER_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.FACT_STR, Operator.FACT_DESC, Operator.FACT_ID, Operator.FACT_SYN, Operator.FACT_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.MOD_STR, Operator.MOD_DESC, Operator.MOD_ID, Operator.MOD_SYN, Operator.MOD_SINCE, Operator.TYPE_ID);
+			addKeyWord(Operator.PERC_STR, Operator.PERC_DESC, Operator.PERC_ID, Operator.PERC_SYN, Operator.PERC_SINCE, Operator.TYPE_ID);
 			/*
-			 * bool operators key words
+			 * Boolean operators key words
 			 */
-			addKeyWord(BooleanOperator.AND_STR, BooleanOperator.AND_DESC, BooleanOperator.AND_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.AND1_STR, BooleanOperator.AND_DESC, BooleanOperator.AND_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.AND2_STR, BooleanOperator.AND_DESC, BooleanOperator.AND_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NAND_STR, BooleanOperator.NAND_DESC, BooleanOperator.NAND_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NAND1_STR, BooleanOperator.NAND_DESC, BooleanOperator.NAND_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NAND2_STR, BooleanOperator.NAND_DESC, BooleanOperator.NAND_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.OR_STR, BooleanOperator.OR_DESC, BooleanOperator.OR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.OR1_STR, BooleanOperator.OR_DESC, BooleanOperator.OR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.OR2_STR, BooleanOperator.OR_DESC, BooleanOperator.OR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NOR_STR, BooleanOperator.NOR_DESC, BooleanOperator.NOR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NOR1_STR, BooleanOperator.NOR_DESC, BooleanOperator.NOR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NOR2_STR, BooleanOperator.NOR_DESC, BooleanOperator.NOR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.XOR_STR, BooleanOperator.XOR_DESC, BooleanOperator.XOR_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.IMP_STR, BooleanOperator.IMP_DESC, BooleanOperator.IMP_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NIMP_STR, BooleanOperator.NIMP_DESC, BooleanOperator.NIMP_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.CIMP_STR, BooleanOperator.CIMP_DESC, BooleanOperator.CIMP_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.CNIMP_STR, BooleanOperator.CNIMP_DESC, BooleanOperator.CNIMP_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.EQV_STR, BooleanOperator.EQV_DESC, BooleanOperator.EQV_ID, BooleanOperator.TYPE_ID);
-			addKeyWord(BooleanOperator.NEG_STR, BooleanOperator.NEG_DESC, BooleanOperator.NEG_ID, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NEG_STR, BooleanOperator.NEG_DESC, BooleanOperator.NEG_ID, BooleanOperator.NEG_SYN, BooleanOperator.NEG_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.AND_STR, BooleanOperator.AND_DESC, BooleanOperator.AND_ID, BooleanOperator.AND_SYN, BooleanOperator.AND_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.AND1_STR, BooleanOperator.AND_DESC, BooleanOperator.AND_ID, BooleanOperator.AND1_SYN, BooleanOperator.AND_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.AND2_STR, BooleanOperator.AND_DESC, BooleanOperator.AND_ID, BooleanOperator.AND2_SYN, BooleanOperator.AND_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NAND_STR, BooleanOperator.NAND_DESC, BooleanOperator.NAND_ID, BooleanOperator.NAND_SYN, BooleanOperator.NAND_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NAND1_STR, BooleanOperator.NAND_DESC, BooleanOperator.NAND_ID, BooleanOperator.NAND1_SYN, BooleanOperator.NAND_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NAND2_STR, BooleanOperator.NAND_DESC, BooleanOperator.NAND_ID, BooleanOperator.NAND2_SYN, BooleanOperator.NAND_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.OR_STR, BooleanOperator.OR_DESC, BooleanOperator.OR_ID, BooleanOperator.OR_SYN, BooleanOperator.OR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.OR1_STR, BooleanOperator.OR_DESC, BooleanOperator.OR_ID, BooleanOperator.OR1_SYN, BooleanOperator.OR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.OR2_STR, BooleanOperator.OR_DESC, BooleanOperator.OR_ID, BooleanOperator.OR2_SYN, BooleanOperator.OR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NOR_STR, BooleanOperator.NOR_DESC, BooleanOperator.NOR_ID, BooleanOperator.NOR_SYN, BooleanOperator.NOR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NOR1_STR, BooleanOperator.NOR_DESC, BooleanOperator.NOR_ID, BooleanOperator.NOR1_SYN, BooleanOperator.NOR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NOR2_STR, BooleanOperator.NOR_DESC, BooleanOperator.NOR_ID, BooleanOperator.NOR2_SYN, BooleanOperator.NOR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.XOR_STR, BooleanOperator.XOR_DESC, BooleanOperator.XOR_ID, BooleanOperator.XOR_SYN, BooleanOperator.XOR_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.IMP_STR, BooleanOperator.IMP_DESC, BooleanOperator.IMP_ID, BooleanOperator.IMP_SYN, BooleanOperator.IMP_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.NIMP_STR, BooleanOperator.NIMP_DESC, BooleanOperator.NIMP_ID, BooleanOperator.NIMP_SYN, BooleanOperator.NIMP_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.CIMP_STR, BooleanOperator.CIMP_DESC, BooleanOperator.CIMP_ID, BooleanOperator.CIMP_SYN, BooleanOperator.CIMP_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.CNIMP_STR, BooleanOperator.CNIMP_DESC, BooleanOperator.CNIMP_ID, BooleanOperator.CNIMP_SYN, BooleanOperator.CNIMP_SINCE, BooleanOperator.TYPE_ID);
+			addKeyWord(BooleanOperator.EQV_STR, BooleanOperator.EQV_DESC, BooleanOperator.EQV_ID, BooleanOperator.EQV_SYN, BooleanOperator.EQV_SINCE, BooleanOperator.TYPE_ID);
 			/*
 			 * Binary relations key words
 			 */
-			addKeyWord(BinaryRelation.EQ_STR, BinaryRelation.EQ_DESC, BinaryRelation.EQ_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.EQ1_STR, BinaryRelation.EQ_DESC, BinaryRelation.EQ_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.NEQ_STR, BinaryRelation.NEQ_DESC, BinaryRelation.NEQ_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.NEQ1_STR, BinaryRelation.NEQ_DESC, BinaryRelation.NEQ_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.NEQ2_STR, BinaryRelation.NEQ_DESC, BinaryRelation.NEQ_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.LT_STR, BinaryRelation.LT_DESC, BinaryRelation.LT_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.GT_STR, BinaryRelation.GT_DESC, BinaryRelation.GT_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.LEQ_STR, BinaryRelation.LEQ_DESC, BinaryRelation.LEQ_ID, BinaryRelation.TYPE_ID);
-			addKeyWord(BinaryRelation.GEQ_STR, BinaryRelation.GEQ_DESC, BinaryRelation.GEQ_ID, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.EQ_STR, BinaryRelation.EQ_DESC, BinaryRelation.EQ_ID, BinaryRelation.EQ_SYN, BinaryRelation.EQ_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.EQ1_STR, BinaryRelation.EQ_DESC, BinaryRelation.EQ_ID, BinaryRelation.EQ1_SYN, BinaryRelation.EQ_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.NEQ_STR, BinaryRelation.NEQ_DESC, BinaryRelation.NEQ_ID, BinaryRelation.NEQ_SYN, BinaryRelation.NEQ_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.NEQ1_STR, BinaryRelation.NEQ_DESC, BinaryRelation.NEQ_ID, BinaryRelation.NEQ1_SYN, BinaryRelation.NEQ_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.NEQ2_STR, BinaryRelation.NEQ_DESC, BinaryRelation.NEQ_ID, BinaryRelation.NEQ2_SYN, BinaryRelation.NEQ_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.LT_STR, BinaryRelation.LT_DESC, BinaryRelation.LT_ID, BinaryRelation.LT_SYN, BinaryRelation.LT_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.GT_STR, BinaryRelation.GT_DESC, BinaryRelation.GT_ID, BinaryRelation.GT_SYN, BinaryRelation.GT_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.LEQ_STR, BinaryRelation.LEQ_DESC, BinaryRelation.LEQ_ID, BinaryRelation.LEQ_SYN, BinaryRelation.LEQ_SINCE, BinaryRelation.TYPE_ID);
+			addKeyWord(BinaryRelation.GEQ_STR, BinaryRelation.GEQ_DESC, BinaryRelation.GEQ_ID, BinaryRelation.GEQ_SYN, BinaryRelation.GEQ_SINCE, BinaryRelation.TYPE_ID);
 			if (parserKeyWordsOnly == false) {
 				/*
 				 * 1 arg functions key words
 				 */
-				addKeyWord(Function1Arg.SIN_STR, Function1Arg.SIN_DESC, Function1Arg.SIN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.COS_STR, Function1Arg.COS_DESC, Function1Arg.COS_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.TAN_STR, Function1Arg.TAN_DESC, Function1Arg.TAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.TG_STR, Function1Arg.TAN_DESC, Function1Arg.TAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CTAN_STR, Function1Arg.CTAN_DESC, Function1Arg.CTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CTG_STR, Function1Arg.CTAN_DESC, Function1Arg.CTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.COT_STR, Function1Arg.CTAN_DESC, Function1Arg.CTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SEC_STR, Function1Arg.SEC_DESC, Function1Arg.SEC_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.COSEC_STR, Function1Arg.COSEC_DESC, Function1Arg.COSEC_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CSC_STR, Function1Arg.COSEC_DESC, Function1Arg.COSEC_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ASIN_STR, Function1Arg.ASIN_DESC, Function1Arg.ASIN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARSIN_STR, Function1Arg.ASIN_DESC, Function1Arg.ASIN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCSIN_STR, Function1Arg.ASIN_DESC, Function1Arg.ASIN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACOS_STR, Function1Arg.ACOS_DESC, Function1Arg.ACOS_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCOS_STR, Function1Arg.ACOS_DESC, Function1Arg.ACOS_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCOS_STR, Function1Arg.ACOS_DESC, Function1Arg.ACOS_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ATAN_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCTAN_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ATG_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCTG_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACTAN_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCTAN_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACTG_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCTG_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACOT_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCOT_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.LN_STR, Function1Arg.LN_DESC, Function1Arg.LN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.LOG2_STR, Function1Arg.LOG2_DESC, Function1Arg.LOG2_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.LOG10_STR, Function1Arg.LOG10_DESC, Function1Arg.LOG10_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.RAD_STR, Function1Arg.RAD_DESC, Function1Arg.RAD_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.EXP_STR, Function1Arg.EXP_DESC, Function1Arg.EXP_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SQRT_STR, Function1Arg.SQRT_DESC, Function1Arg.SQRT_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SINH_STR, Function1Arg.SINH_DESC, Function1Arg.SINH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.COSH_STR, Function1Arg.COSH_DESC, Function1Arg.COSH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.TANH_STR, Function1Arg.TANH_DESC, Function1Arg.TANH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.TGH_STR, Function1Arg.TANH_DESC, Function1Arg.TANH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CTANH_STR, Function1Arg.COTH_DESC, Function1Arg.COTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.COTH_STR, Function1Arg.COTH_DESC, Function1Arg.COTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CTGH_STR, Function1Arg.COTH_DESC, Function1Arg.COTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SECH_STR, Function1Arg.SECH_DESC, Function1Arg.SECH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CSCH_STR, Function1Arg.CSCH_DESC, Function1Arg.CSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.COSECH_STR, Function1Arg.CSCH_DESC, Function1Arg.CSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.DEG_STR, Function1Arg.DEG_DESC, Function1Arg.DEG_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ABS_STR, Function1Arg.ABS_DESC, Function1Arg.ABS_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SGN_STR, Function1Arg.SGN_DESC, Function1Arg.SGN_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.FLOOR_STR, Function1Arg.FLOOR_DESC, Function1Arg.FLOOR_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.CEIL_STR, Function1Arg.CEIL_DESC, Function1Arg.CEIL_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.NOT_STR, Function1Arg.NOT_DESC, Function1Arg.NOT_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ASINH_STR, Function1Arg.ARSINH_DESC, Function1Arg.ARSINH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARSINH_STR, Function1Arg.ARSINH_DESC, Function1Arg.ARSINH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCSINH_STR, Function1Arg.ARSINH_DESC, Function1Arg.ARSINH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACOSH_STR, Function1Arg.ARCOSH_DESC, Function1Arg.ARCOSH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCOSH_STR, Function1Arg.ARCOSH_DESC, Function1Arg.ARCOSH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCOSH_STR, Function1Arg.ARCOSH_DESC, Function1Arg.ARCOSH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ATANH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCTANH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ATGH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCTGH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACTANH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCTANH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACOTH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCOTH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCOTH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACTGH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCTGH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ASECH_STR, Function1Arg.ARSECH_DESC, Function1Arg.ARSECH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARSECH_STR, Function1Arg.ARSECH_DESC, Function1Arg.ARSECH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCSECH_STR, Function1Arg.ARSECH_DESC, Function1Arg.ARSECH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACSCH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCSCH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCSCH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ACOSECH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCOSECH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ARCCOSECH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SA_STR, Function1Arg.SA_DESC, Function1Arg.SA_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SA1_STR, Function1Arg.SA_DESC, Function1Arg.SA_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.SINC_STR, Function1Arg.SINC_DESC, Function1Arg.SINC_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.BELL_NUMBER_STR, Function1Arg.BELL_NUMBER_DESC, Function1Arg.BELL_NUMBER_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.FIBONACCI_NUMBER_STR, Function1Arg.FIBONACCI_NUMBER_DESC, Function1Arg.FIBONACCI_NUMBER_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.LUCAS_NUMBER_STR, Function1Arg.LUCAS_NUMBER_DESC, Function1Arg.LUCAS_NUMBER_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.HARMONIC_NUMBER_STR, Function1Arg.HARMONIC_NUMBER_DESC, Function1Arg.HARMONIC_NUMBER_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.IS_PRIME_STR, Function1Arg.IS_PRIME_DESC, Function1Arg.IS_PRIME_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.PRIME_COUNT_STR, Function1Arg.PRIME_COUNT_DESC, Function1Arg.PRIME_COUNT_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.EXP_INT_STR, Function1Arg.EXP_INT_DESC, Function1Arg.EXP_INT_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.LOG_INT_STR, Function1Arg.LOG_INT_DESC, Function1Arg.LOG_INT_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.OFF_LOG_INT_STR, Function1Arg.OFF_LOG_INT_DESC, Function1Arg.OFF_LOG_INT_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.GAUSS_ERF_STR, Function1Arg.GAUSS_ERF_DESC, Function1Arg.GAUSS_ERF_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.GAUSS_ERFC_STR, Function1Arg.GAUSS_ERFC_DESC, Function1Arg.GAUSS_ERFC_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.GAUSS_ERF_INV_STR, Function1Arg.GAUSS_ERF_INV_DESC, Function1Arg.GAUSS_ERF_INV_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.GAUSS_ERFC_INV_STR, Function1Arg.GAUSS_ERFC_INV_DESC, Function1Arg.GAUSS_ERFC_INV_ID, Function1Arg.TYPE_ID);
-				addKeyWord(Function1Arg.ULP_STR, Function1Arg.ULP_DESC, Function1Arg.ULP_ID, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SIN_STR, Function1Arg.SIN_DESC, Function1Arg.SIN_ID, Function1Arg.SIN_SYN, Function1Arg.SIN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.COS_STR, Function1Arg.COS_DESC, Function1Arg.COS_ID, Function1Arg.COS_SYN, Function1Arg.COS_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.TAN_STR, Function1Arg.TAN_DESC, Function1Arg.TAN_ID, Function1Arg.TAN_SYN, Function1Arg.TAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.TG_STR, Function1Arg.TAN_DESC, Function1Arg.TAN_ID, Function1Arg.TG_SYN, Function1Arg.TAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CTAN_STR, Function1Arg.CTAN_DESC, Function1Arg.CTAN_ID, Function1Arg.CTAN_SYN, Function1Arg.CTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CTG_STR, Function1Arg.CTAN_DESC, Function1Arg.CTAN_ID, Function1Arg.CTG_SYN, Function1Arg.CTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.COT_STR, Function1Arg.CTAN_DESC, Function1Arg.CTAN_ID, Function1Arg.COT_SYN, Function1Arg.CTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SEC_STR, Function1Arg.SEC_DESC, Function1Arg.SEC_ID, Function1Arg.SEC_SYN, Function1Arg.SEC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.COSEC_STR, Function1Arg.COSEC_DESC, Function1Arg.COSEC_ID, Function1Arg.COSEC_SYN, Function1Arg.COSEC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CSC_STR, Function1Arg.COSEC_DESC, Function1Arg.COSEC_ID, Function1Arg.CSC_SYN, Function1Arg.COSEC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ASIN_STR, Function1Arg.ASIN_DESC, Function1Arg.ASIN_ID, Function1Arg.ASIN_SYN, Function1Arg.ASIN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARSIN_STR, Function1Arg.ASIN_DESC, Function1Arg.ASIN_ID, Function1Arg.ARSIN_SYN, Function1Arg.ASIN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCSIN_STR, Function1Arg.ASIN_DESC, Function1Arg.ASIN_ID, Function1Arg.ARCSIN_SYN, Function1Arg.ASIN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACOS_STR, Function1Arg.ACOS_DESC, Function1Arg.ACOS_ID, Function1Arg.ACOS_SYN, Function1Arg.ACOS_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCOS_STR, Function1Arg.ACOS_DESC, Function1Arg.ACOS_ID, Function1Arg.ARCOS_SYN, Function1Arg.ACOS_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCOS_STR, Function1Arg.ACOS_DESC, Function1Arg.ACOS_ID, Function1Arg.ARCCOS_SYN, Function1Arg.ACOS_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ATAN_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.ATAN_SYN, Function1Arg.ATAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCTAN_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.ARCTAN_SYN, Function1Arg.ATAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ATG_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.ATG_SYN, Function1Arg.ATAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCTG_STR, Function1Arg.ATAN_DESC, Function1Arg.ATAN_ID, Function1Arg.ARCTG_SYN, Function1Arg.ATAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACTAN_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.ACTAN_SYN, Function1Arg.ACTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCTAN_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.ARCCTAN_SYN, Function1Arg.ACTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACTG_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.ACTG_SYN, Function1Arg.ACTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCTG_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.ARCCTG_SYN, Function1Arg.ACTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACOT_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.ACOT_SYN, Function1Arg.ACTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCOT_STR, Function1Arg.ACTAN_DESC, Function1Arg.ACTAN_ID, Function1Arg.ARCCOT_SYN, Function1Arg.ACTAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.LN_STR, Function1Arg.LN_DESC, Function1Arg.LN_ID, Function1Arg.LN_SYN, Function1Arg.LN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.LOG2_STR, Function1Arg.LOG2_DESC, Function1Arg.LOG2_ID, Function1Arg.LOG2_SYN, Function1Arg.LOG2_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.LOG10_STR, Function1Arg.LOG10_DESC, Function1Arg.LOG10_ID, Function1Arg.LOG10_SYN, Function1Arg.LOG10_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.RAD_STR, Function1Arg.RAD_DESC, Function1Arg.RAD_ID, Function1Arg.RAD_SYN, Function1Arg.RAD_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.EXP_STR, Function1Arg.EXP_DESC, Function1Arg.EXP_ID, Function1Arg.EXP_SYN, Function1Arg.EXP_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SQRT_STR, Function1Arg.SQRT_DESC, Function1Arg.SQRT_ID, Function1Arg.SQRT_SYN, Function1Arg.SQRT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SINH_STR, Function1Arg.SINH_DESC, Function1Arg.SINH_ID, Function1Arg.SINH_SYN, Function1Arg.SINH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.COSH_STR, Function1Arg.COSH_DESC, Function1Arg.COSH_ID, Function1Arg.COSH_SYN, Function1Arg.COSH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.TANH_STR, Function1Arg.TANH_DESC, Function1Arg.TANH_ID, Function1Arg.TANH_SYN, Function1Arg.TANH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.TGH_STR, Function1Arg.TANH_DESC, Function1Arg.TANH_ID, Function1Arg.TGH_SYN, Function1Arg.TANH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CTANH_STR, Function1Arg.COTH_DESC, Function1Arg.COTH_ID, Function1Arg.CTANH_SYN, Function1Arg.COTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.COTH_STR, Function1Arg.COTH_DESC, Function1Arg.COTH_ID, Function1Arg.COTH_SYN, Function1Arg.COTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CTGH_STR, Function1Arg.COTH_DESC, Function1Arg.COTH_ID, Function1Arg.CTGH_SYN, Function1Arg.COTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SECH_STR, Function1Arg.SECH_DESC, Function1Arg.SECH_ID, Function1Arg.SECH_SYN, Function1Arg.SECH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CSCH_STR, Function1Arg.CSCH_DESC, Function1Arg.CSCH_ID, Function1Arg.CSCH_SYN, Function1Arg.CSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.COSECH_STR, Function1Arg.CSCH_DESC, Function1Arg.CSCH_ID, Function1Arg.COSECH_SYN, Function1Arg.CSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.DEG_STR, Function1Arg.DEG_DESC, Function1Arg.DEG_ID, Function1Arg.DEG_SYN, Function1Arg.DEG_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ABS_STR, Function1Arg.ABS_DESC, Function1Arg.ABS_ID, Function1Arg.ABS_SYN, Function1Arg.ABS_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SGN_STR, Function1Arg.SGN_DESC, Function1Arg.SGN_ID, Function1Arg.SGN_SYN, Function1Arg.SGN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.FLOOR_STR, Function1Arg.FLOOR_DESC, Function1Arg.FLOOR_ID, Function1Arg.FLOOR_SYN, Function1Arg.FLOOR_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.CEIL_STR, Function1Arg.CEIL_DESC, Function1Arg.CEIL_ID, Function1Arg.CEIL_SYN, Function1Arg.CEIL_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.NOT_STR, Function1Arg.NOT_DESC, Function1Arg.NOT_ID, Function1Arg.NOT_SYN, Function1Arg.NOT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ASINH_STR, Function1Arg.ARSINH_DESC, Function1Arg.ARSINH_ID, Function1Arg.ASINH_SYN, Function1Arg.ARSINH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARSINH_STR, Function1Arg.ARSINH_DESC, Function1Arg.ARSINH_ID, Function1Arg.ARSINH_SYN, Function1Arg.ARSINH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCSINH_STR, Function1Arg.ARSINH_DESC, Function1Arg.ARSINH_ID, Function1Arg.ARCSINH_SYN, Function1Arg.ARSINH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACOSH_STR, Function1Arg.ARCOSH_DESC, Function1Arg.ARCOSH_ID, Function1Arg.ACOSH_SYN, Function1Arg.ARCOSH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCOSH_STR, Function1Arg.ARCOSH_DESC, Function1Arg.ARCOSH_ID, Function1Arg.ARCOSH_SYN, Function1Arg.ARCOSH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCOSH_STR, Function1Arg.ARCOSH_DESC, Function1Arg.ARCOSH_ID, Function1Arg.ARCCOSH_SYN, Function1Arg.ARCOSH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ATANH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.ATANH_SYN, Function1Arg.ARTANH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCTANH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.ARCTANH_SYN, Function1Arg.ARTANH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ATGH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.ATGH_SYN, Function1Arg.ARTANH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCTGH_STR, Function1Arg.ARTANH_DESC, Function1Arg.ARTANH_ID, Function1Arg.ARCTGH_SYN, Function1Arg.ARTANH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACTANH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ACTANH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCTANH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ARCCTANH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACOTH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ACOTH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCOTH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ARCOTH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCOTH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ARCCOTH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACTGH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ACTGH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCTGH_STR, Function1Arg.ARCOTH_DESC, Function1Arg.ARCOTH_ID, Function1Arg.ARCCTGH_SYN, Function1Arg.ARCOTH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ASECH_STR, Function1Arg.ARSECH_DESC, Function1Arg.ARSECH_ID, Function1Arg.ASECH_SYN, Function1Arg.ARSECH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARSECH_STR, Function1Arg.ARSECH_DESC, Function1Arg.ARSECH_ID, Function1Arg.ARSECH_SYN, Function1Arg.ARSECH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCSECH_STR, Function1Arg.ARSECH_DESC, Function1Arg.ARSECH_ID, Function1Arg.ARCSECH_SYN, Function1Arg.ARSECH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACSCH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.ACSCH_SYN, Function1Arg.ARCSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCSCH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.ARCSCH_SYN, Function1Arg.ARCSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCSCH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.ARCCSCH_SYN, Function1Arg.ARCSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ACOSECH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.ACOSECH_SYN, Function1Arg.ARCSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCOSECH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.ARCOSECH_SYN, Function1Arg.ARCSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCOSECH_STR, Function1Arg.ARCSCH_DESC, Function1Arg.ARCSCH_ID, Function1Arg.ARCCOSECH_SYN, Function1Arg.ARCSCH_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SA_STR, Function1Arg.SA_DESC, Function1Arg.SA_ID, Function1Arg.SA_SYN, Function1Arg.SA_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SA1_STR, Function1Arg.SA_DESC, Function1Arg.SA_ID, Function1Arg.SA1_SYN, Function1Arg.SA_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.SINC_STR, Function1Arg.SINC_DESC, Function1Arg.SINC_ID, Function1Arg.SINC_SYN, Function1Arg.SINC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.BELL_NUMBER_STR, Function1Arg.BELL_NUMBER_DESC, Function1Arg.BELL_NUMBER_ID, Function1Arg.BELL_NUMBER_SYN, Function1Arg.BELL_NUMBER_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.FIBONACCI_NUMBER_STR, Function1Arg.FIBONACCI_NUMBER_DESC, Function1Arg.FIBONACCI_NUMBER_ID, Function1Arg.FIBONACCI_NUMBER_SYN, Function1Arg.FIBONACCI_NUMBER_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.LUCAS_NUMBER_STR, Function1Arg.LUCAS_NUMBER_DESC, Function1Arg.LUCAS_NUMBER_ID, Function1Arg.LUCAS_NUMBER_SYN, Function1Arg.LUCAS_NUMBER_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.HARMONIC_NUMBER_STR, Function1Arg.HARMONIC_NUMBER_DESC, Function1Arg.HARMONIC_NUMBER_ID, Function1Arg.HARMONIC_NUMBER_SYN, Function1Arg.HARMONIC_NUMBER_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.IS_PRIME_STR, Function1Arg.IS_PRIME_DESC, Function1Arg.IS_PRIME_ID, Function1Arg.IS_PRIME_SYN, Function1Arg.IS_PRIME_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.PRIME_COUNT_STR, Function1Arg.PRIME_COUNT_DESC, Function1Arg.PRIME_COUNT_ID, Function1Arg.PRIME_COUNT_SYN, Function1Arg.PRIME_COUNT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.EXP_INT_STR, Function1Arg.EXP_INT_DESC, Function1Arg.EXP_INT_ID, Function1Arg.EXP_INT_SYN, Function1Arg.EXP_INT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.LOG_INT_STR, Function1Arg.LOG_INT_DESC, Function1Arg.LOG_INT_ID, Function1Arg.LOG_INT_SYN, Function1Arg.LOG_INT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.OFF_LOG_INT_STR, Function1Arg.OFF_LOG_INT_DESC, Function1Arg.OFF_LOG_INT_ID, Function1Arg.OFF_LOG_INT_SYN, Function1Arg.OFF_LOG_INT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.GAUSS_ERF_STR, Function1Arg.GAUSS_ERF_DESC, Function1Arg.GAUSS_ERF_ID, Function1Arg.GAUSS_ERF_SYN, Function1Arg.GAUSS_ERF_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.GAUSS_ERFC_STR, Function1Arg.GAUSS_ERFC_DESC, Function1Arg.GAUSS_ERFC_ID, Function1Arg.GAUSS_ERFC_SYN, Function1Arg.GAUSS_ERFC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.GAUSS_ERF_INV_STR, Function1Arg.GAUSS_ERF_INV_DESC, Function1Arg.GAUSS_ERF_INV_ID, Function1Arg.GAUSS_ERF_INV_SYN, Function1Arg.GAUSS_ERF_INV_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.GAUSS_ERFC_INV_STR, Function1Arg.GAUSS_ERFC_INV_DESC, Function1Arg.GAUSS_ERFC_INV_ID, Function1Arg.GAUSS_ERFC_INV_SYN, Function1Arg.GAUSS_ERFC_INV_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ULP_STR, Function1Arg.ULP_DESC, Function1Arg.ULP_ID, Function1Arg.ULP_SYN, Function1Arg.ULP_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ISNAN_STR, Function1Arg.ISNAN_DESC, Function1Arg.ISNAN_ID, Function1Arg.ISNAN_SYN, Function1Arg.ISNAN_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.NDIG10_STR, Function1Arg.NDIG10_DESC, Function1Arg.NDIG10_ID, Function1Arg.NDIG10_SYN, Function1Arg.NDIG10_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.NFACT_STR, Function1Arg.NFACT_DESC, Function1Arg.NFACT_ID, Function1Arg.NFACT_SYN, Function1Arg.NFACT_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCSEC_STR, Function1Arg.ARCSEC_DESC, Function1Arg.ARCSEC_ID, Function1Arg.ARCSEC_SYN, Function1Arg.ARCSEC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.ARCCSC_STR, Function1Arg.ARCCSC_DESC, Function1Arg.ARCCSC_ID, Function1Arg.ARCCSC_SYN, Function1Arg.ARCCSC_SINCE, Function1Arg.TYPE_ID);
+				addKeyWord(Function1Arg.GAMMA_STR, Function1Arg.GAMMA_DESC, Function1Arg.GAMMA_ID, Function1Arg.GAMMA_SYN, Function1Arg.GAMMA_SINCE, Function1Arg.TYPE_ID);
 				/*
 				 * 2 args functions key words
 				 */
-				addKeyWord(Function2Arg.LOG_STR, Function2Arg.LOG_DESC, Function2Arg.LOG_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.MOD_STR, Function2Arg.MOD_DESC, Function2Arg.MOD_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.BINOM_COEFF_STR, Function2Arg.BINOM_COEFF_DESC, Function2Arg.BINOM_COEFF_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.BERNOULLI_NUMBER_STR, Function2Arg.BERNOULLI_NUMBER_DESC, Function2Arg.BERNOULLI_NUMBER_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.STIRLING1_NUMBER_STR, Function2Arg.STIRLING1_NUMBER_DESC, Function2Arg.STIRLING1_NUMBER_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.STIRLING2_NUMBER_STR, Function2Arg.STIRLING2_NUMBER_DESC, Function2Arg.STIRLING2_NUMBER_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.WORPITZKY_NUMBER_STR, Function2Arg.WORPITZKY_NUMBER_DESC, Function2Arg.WORPITZKY_NUMBER_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.EULER_NUMBER_STR, Function2Arg.EULER_NUMBER_DESC, Function2Arg.EULER_NUMBER_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.KRONECKER_DELTA_STR, Function2Arg.KRONECKER_DELTA_DESC, Function2Arg.KRONECKER_DELTA_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.EULER_POLYNOMIAL_STR, Function2Arg.EULER_POLYNOMIAL_DESC, Function2Arg.EULER_POLYNOMIAL_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.HARMONIC_NUMBER_STR, Function2Arg.HARMONIC_NUMBER_DESC, Function2Arg.HARMONIC_NUMBER_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.RND_UNIFORM_CONT_STR, Function2Arg.RND_UNIFORM_CONT_DESC, Function2Arg.RND_UNIFORM_CONT_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.RND_UNIFORM_DISCR_STR, Function2Arg.RND_UNIFORM_DISCR_DESC, Function2Arg.RND_UNIFORM_DISCR_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.ROUND_STR, Function2Arg.ROUND_DESC, Function2Arg.ROUND_ID, Function2Arg.TYPE_ID);
-				addKeyWord(Function2Arg.RND_NORMAL_STR, Function2Arg.RND_NORMAL_DESC, Function2Arg.RND_NORMAL_ID, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.LOG_STR, Function2Arg.LOG_DESC, Function2Arg.LOG_ID, Function2Arg.LOG_SYN, Function2Arg.LOG_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.MOD_STR, Function2Arg.MOD_DESC, Function2Arg.MOD_ID, Function2Arg.MOD_SYN, Function2Arg.MOD_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.BINOM_COEFF_STR, Function2Arg.BINOM_COEFF_DESC, Function2Arg.BINOM_COEFF_ID, Function2Arg.BINOM_COEFF_SYN, Function2Arg.BINOM_COEFF_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.BERNOULLI_NUMBER_STR, Function2Arg.BERNOULLI_NUMBER_DESC, Function2Arg.BERNOULLI_NUMBER_ID, Function2Arg.BERNOULLI_NUMBER_SYN, Function2Arg.BERNOULLI_NUMBER_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.STIRLING1_NUMBER_STR, Function2Arg.STIRLING1_NUMBER_DESC, Function2Arg.STIRLING1_NUMBER_ID, Function2Arg.STIRLING1_NUMBER_SYN, Function2Arg.STIRLING1_NUMBER_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.STIRLING2_NUMBER_STR, Function2Arg.STIRLING2_NUMBER_DESC, Function2Arg.STIRLING2_NUMBER_ID, Function2Arg.STIRLING2_NUMBER_SYN, Function2Arg.STIRLING2_NUMBER_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.WORPITZKY_NUMBER_STR, Function2Arg.WORPITZKY_NUMBER_DESC, Function2Arg.WORPITZKY_NUMBER_ID, Function2Arg.WORPITZKY_NUMBER_SYN, Function2Arg.WORPITZKY_NUMBER_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.EULER_NUMBER_STR, Function2Arg.EULER_NUMBER_DESC, Function2Arg.EULER_NUMBER_ID, Function2Arg.EULER_NUMBER_SYN, Function2Arg.EULER_NUMBER_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.KRONECKER_DELTA_STR, Function2Arg.KRONECKER_DELTA_DESC, Function2Arg.KRONECKER_DELTA_ID, Function2Arg.KRONECKER_DELTA_SYN, Function2Arg.KRONECKER_DELTA_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.EULER_POLYNOMIAL_STR, Function2Arg.EULER_POLYNOMIAL_DESC, Function2Arg.EULER_POLYNOMIAL_ID, Function2Arg.EULER_POLYNOMIAL_SYN, Function2Arg.EULER_POLYNOMIAL_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.HARMONIC_NUMBER_STR, Function2Arg.HARMONIC_NUMBER_DESC, Function2Arg.HARMONIC_NUMBER_ID, Function2Arg.HARMONIC_NUMBER_SYN, Function2Arg.HARMONIC_NUMBER_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.RND_UNIFORM_CONT_STR, Function2Arg.RND_UNIFORM_CONT_DESC, Function2Arg.RND_UNIFORM_CONT_ID, Function2Arg.RND_UNIFORM_CONT_SYN, Function2Arg.RND_UNIFORM_CONT_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.RND_UNIFORM_DISCR_STR, Function2Arg.RND_UNIFORM_DISCR_DESC, Function2Arg.RND_UNIFORM_DISCR_ID, Function2Arg.RND_UNIFORM_DISCR_SYN, Function2Arg.RND_UNIFORM_DISCR_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.ROUND_STR, Function2Arg.ROUND_DESC, Function2Arg.ROUND_ID, Function2Arg.ROUND_SYN, Function2Arg.ROUND_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.RND_NORMAL_STR, Function2Arg.RND_NORMAL_DESC, Function2Arg.RND_NORMAL_ID, Function2Arg.RND_NORMAL_SYN, Function2Arg.RND_NORMAL_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.NDIG_STR, Function2Arg.NDIG_DESC, Function2Arg.NDIG_ID, Function2Arg.NDIG_SYN, Function2Arg.NDIG_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.DIGIT10_STR, Function2Arg.DIGIT10_DESC, Function2Arg.DIGIT10_ID, Function2Arg.DIGIT10_SYN, Function2Arg.DIGIT10_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.FACTVAL_STR, Function2Arg.FACTVAL_DESC, Function2Arg.FACTVAL_ID, Function2Arg.FACTVAL_SYN, Function2Arg.FACTVAL_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.FACTEXP_STR, Function2Arg.FACTEXP_DESC, Function2Arg.FACTEXP_ID, Function2Arg.FACTEXP_SYN, Function2Arg.FACTEXP_SINCE, Function2Arg.TYPE_ID);
+				addKeyWord(Function2Arg.ROOT_STR, Function2Arg.ROOT_DESC, Function2Arg.ROOT_ID, Function2Arg.ROOT_SYN, Function2Arg.ROOT_SINCE, Function2Arg.TYPE_ID);
 				/*
 				 * 3 args functions key words
 				 */
-				addKeyWord(Function3Arg.IF_STR, Function3Arg.IF_DESC, Function3Arg.IF_CONDITION_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.CHI_ab_STR, Function3Arg.CHI_ab_DESC, Function3Arg.CHI_ab_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.CHI_AB_STR, Function3Arg.CHI_AB_DESC, Function3Arg.CHI_AB_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.CHI_Ab_STR, Function3Arg.CHI_Ab_DESC, Function3Arg.CHI_Ab_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.CHI_aB_STR, Function3Arg.CHI_aB_DESC, Function3Arg.CHI_aB_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.PDF_UNIFORM_CONT_STR, Function3Arg.PDF_UNIFORM_CONT_DESC, Function3Arg.PDF_UNIFORM_CONT_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.CDF_UNIFORM_CONT_STR, Function3Arg.CDF_UNIFORM_CONT_DESC, Function3Arg.CDF_UNIFORM_CONT_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.QNT_UNIFORM_CONT_STR, Function3Arg.QNT_UNIFORM_CONT_DESC, Function3Arg.QNT_UNIFORM_CONT_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.PDF_NORMAL_STR, Function3Arg.PDF_NORMAL_DESC, Function3Arg.PDF_NORMAL_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.CDF_NORMAL_STR, Function3Arg.CDF_NORMAL_DESC, Function3Arg.CDF_NORMAL_ID, Function3Arg.TYPE_ID);
-				addKeyWord(Function3Arg.QNT_NORMAL_STR, Function3Arg.QNT_NORMAL_DESC, Function3Arg.QNT_NORMAL_ID, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.IF_STR, Function3Arg.IF_DESC, Function3Arg.IF_CONDITION_ID, Function3Arg.IF_SYN, Function3Arg.IF_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.CHI_STR, Function3Arg.CHI_DESC, Function3Arg.CHI_ID, Function3Arg.CHI_SYN, Function3Arg.CHI_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.CHI_LR_STR, Function3Arg.CHI_LR_DESC, Function3Arg.CHI_LR_ID, Function3Arg.CHI_LR_SYN, Function3Arg.CHI_LR_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.CHI_L_STR, Function3Arg.CHI_L_DESC, Function3Arg.CHI_L_ID, Function3Arg.CHI_L_SYN, Function3Arg.CHI_L_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.CHI_R_STR, Function3Arg.CHI_R_DESC, Function3Arg.CHI_R_ID, Function3Arg.CHI_R_SYN, Function3Arg.CHI_R_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.PDF_UNIFORM_CONT_STR, Function3Arg.PDF_UNIFORM_CONT_DESC, Function3Arg.PDF_UNIFORM_CONT_ID, Function3Arg.PDF_UNIFORM_CONT_SYN, Function3Arg.PDF_UNIFORM_CONT_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.CDF_UNIFORM_CONT_STR, Function3Arg.CDF_UNIFORM_CONT_DESC, Function3Arg.CDF_UNIFORM_CONT_ID, Function3Arg.CDF_UNIFORM_CONT_SYN, Function3Arg.CDF_UNIFORM_CONT_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.QNT_UNIFORM_CONT_STR, Function3Arg.QNT_UNIFORM_CONT_DESC, Function3Arg.QNT_UNIFORM_CONT_ID, Function3Arg.QNT_UNIFORM_CONT_SYN, Function3Arg.QNT_UNIFORM_CONT_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.PDF_NORMAL_STR, Function3Arg.PDF_NORMAL_DESC, Function3Arg.PDF_NORMAL_ID, Function3Arg.PDF_NORMAL_SYN, Function3Arg.PDF_NORMAL_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.CDF_NORMAL_STR, Function3Arg.CDF_NORMAL_DESC, Function3Arg.CDF_NORMAL_ID, Function3Arg.CDF_NORMAL_SYN, Function3Arg.CDF_NORMAL_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.QNT_NORMAL_STR, Function3Arg.QNT_NORMAL_DESC, Function3Arg.QNT_NORMAL_ID, Function3Arg.QNT_NORMAL_SYN, Function3Arg.QNT_NORMAL_SINCE, Function3Arg.TYPE_ID);
+				addKeyWord(Function3Arg.DIGIT_STR, Function3Arg.DIGIT_DESC, Function3Arg.DIGIT_ID, Function3Arg.DIGIT_SYN, Function3Arg.DIGIT_SINCE, Function3Arg.TYPE_ID);
 				/*
 				 * Variadic functions as key words
 				 */
-				addKeyWord(FunctionVariadic.IFF_STR, FunctionVariadic.IFF_DESC, FunctionVariadic.IFF_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.MIN_STR, FunctionVariadic.MIN_DESC, FunctionVariadic.MIN_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.MAX_STR, FunctionVariadic.MAX_DESC, FunctionVariadic.MAX_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.CONT_FRAC_STR, FunctionVariadic.CONT_FRAC_DESC, FunctionVariadic.CONT_FRAC_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.CONT_POL_STR, FunctionVariadic.CONT_POL_DESC, FunctionVariadic.CONT_POL_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.GCD_STR, FunctionVariadic.GCD_DESC, FunctionVariadic.GCD_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.LCM_STR, FunctionVariadic.LCM_DESC, FunctionVariadic.LCM_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.SUM_STR, FunctionVariadic.SUM_DESC, FunctionVariadic.SUM_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.PROD_STR, FunctionVariadic.PROD_DESC, FunctionVariadic.PROD_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.AVG_STR, FunctionVariadic.AVG_DESC, FunctionVariadic.AVG_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.VAR_STR, FunctionVariadic.VAR_DESC, FunctionVariadic.VAR_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.STD_STR, FunctionVariadic.STD_DESC, FunctionVariadic.STD_ID, FunctionVariadic.TYPE_ID);
-				addKeyWord(FunctionVariadic.RND_LIST_STR, FunctionVariadic.RND_LIST_DESC, FunctionVariadic.RND_LIST_ID, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.IFF_STR, FunctionVariadic.IFF_DESC, FunctionVariadic.IFF_ID, FunctionVariadic.IFF_SYN, FunctionVariadic.IFF_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.MIN_STR, FunctionVariadic.MIN_DESC, FunctionVariadic.MIN_ID, FunctionVariadic.MIN_SYN, FunctionVariadic.MIN_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.MAX_STR, FunctionVariadic.MAX_DESC, FunctionVariadic.MAX_ID, FunctionVariadic.MAX_SYN, FunctionVariadic.MAX_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.CONT_FRAC_STR, FunctionVariadic.CONT_FRAC_DESC, FunctionVariadic.CONT_FRAC_ID, FunctionVariadic.CONT_FRAC_SYN, FunctionVariadic.CONT_FRAC_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.CONT_POL_STR, FunctionVariadic.CONT_POL_DESC, FunctionVariadic.CONT_POL_ID, FunctionVariadic.CONT_POL_SYN, FunctionVariadic.CONT_POL_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.GCD_STR, FunctionVariadic.GCD_DESC, FunctionVariadic.GCD_ID, FunctionVariadic.GCD_SYN, FunctionVariadic.GCD_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.LCM_STR, FunctionVariadic.LCM_DESC, FunctionVariadic.LCM_ID, FunctionVariadic.LCM_SYN, FunctionVariadic.LCM_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.SUM_STR, FunctionVariadic.SUM_DESC, FunctionVariadic.SUM_ID, FunctionVariadic.SUM_SYN, FunctionVariadic.SUM_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.PROD_STR, FunctionVariadic.PROD_DESC, FunctionVariadic.PROD_ID, FunctionVariadic.PROD_SYN, FunctionVariadic.PROD_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.AVG_STR, FunctionVariadic.AVG_DESC, FunctionVariadic.AVG_ID, FunctionVariadic.AVG_SYN, FunctionVariadic.AVG_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.VAR_STR, FunctionVariadic.VAR_DESC, FunctionVariadic.VAR_ID, FunctionVariadic.VAR_SYN, FunctionVariadic.VAR_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.STD_STR, FunctionVariadic.STD_DESC, FunctionVariadic.STD_ID, FunctionVariadic.STD_SYN, FunctionVariadic.STD_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.RND_LIST_STR, FunctionVariadic.RND_LIST_DESC, FunctionVariadic.RND_LIST_ID, FunctionVariadic.RND_LIST_SYN, FunctionVariadic.RND_LIST_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.COALESCE_STR, FunctionVariadic.COALESCE_DESC, FunctionVariadic.COALESCE_ID, FunctionVariadic.COALESCE_SYN, FunctionVariadic.COALESCE_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.OR_STR, FunctionVariadic.OR_DESC, FunctionVariadic.OR_ID, FunctionVariadic.OR_SYN, FunctionVariadic.OR_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.AND_STR, FunctionVariadic.AND_DESC, FunctionVariadic.AND_ID, FunctionVariadic.AND_SYN, FunctionVariadic.AND_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.XOR_STR, FunctionVariadic.XOR_DESC, FunctionVariadic.XOR_ID, FunctionVariadic.XOR_SYN, FunctionVariadic.XOR_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.ARGMIN_STR, FunctionVariadic.ARGMIN_DESC, FunctionVariadic.ARGMIN_ID, FunctionVariadic.ARGMIN_SYN, FunctionVariadic.ARGMIN_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.ARGMAX_STR, FunctionVariadic.ARGMAX_DESC, FunctionVariadic.ARGMAX_ID, FunctionVariadic.ARGMAX_SYN, FunctionVariadic.ARGMAX_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.MEDIAN_STR, FunctionVariadic.MEDIAN_DESC, FunctionVariadic.MEDIAN_ID, FunctionVariadic.MEDIAN_SYN, FunctionVariadic.MEDIAN_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.MODE_STR, FunctionVariadic.MODE_DESC, FunctionVariadic.MODE_ID, FunctionVariadic.MODE_SYN, FunctionVariadic.MODE_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.BASE_STR, FunctionVariadic.BASE_DESC, FunctionVariadic.BASE_ID, FunctionVariadic.BASE_SYN, FunctionVariadic.BASE_SINCE, FunctionVariadic.TYPE_ID);
+				addKeyWord(FunctionVariadic.NDIST_STR, FunctionVariadic.NDIST_DESC, FunctionVariadic.NDIST_ID, FunctionVariadic.NDIST_SYN, FunctionVariadic.NDIST_SINCE, FunctionVariadic.TYPE_ID);
 				/*
 				 * Calculus key words
 				 */
-				addKeyWord(CalculusOperator.SUM_STR, CalculusOperator.SUM_DESC, CalculusOperator.SUM_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.PROD_STR, CalculusOperator.PROD_DESC, CalculusOperator.PROD_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.INT_STR, CalculusOperator.INT_DESC, CalculusOperator.INT_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.DER_STR, CalculusOperator.DER_DESC, CalculusOperator.DER_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.DER_LEFT_STR, CalculusOperator.DER_LEFT_DESC, CalculusOperator.DER_LEFT_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.DER_RIGHT_STR, CalculusOperator.DER_RIGHT_DESC, CalculusOperator.DER_RIGHT_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.DERN_STR, CalculusOperator.DERN_DESC, CalculusOperator.DERN_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.FORW_DIFF_STR, CalculusOperator.FORW_DIFF_DESC, CalculusOperator.FORW_DIFF_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.BACKW_DIFF_STR, CalculusOperator.BACKW_DIFF_DESC, CalculusOperator.BACKW_DIFF_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.AVG_STR, CalculusOperator.AVG_DESC, CalculusOperator.AVG_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.VAR_STR, CalculusOperator.VAR_DESC, CalculusOperator.VAR_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.STD_STR, CalculusOperator.STD_DESC, CalculusOperator.STD_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.MIN_STR, CalculusOperator.MIN_DESC, CalculusOperator.MIN_ID, CalculusOperator.TYPE_ID);
-				addKeyWord(CalculusOperator.MAX_STR, CalculusOperator.MAX_DESC, CalculusOperator.MAX_ID, CalculusOperator.TYPE_ID);
-
+				addKeyWord(CalculusOperator.SUM_STR, CalculusOperator.SUM_DESC, CalculusOperator.SUM_ID, CalculusOperator.SUM_SYN, CalculusOperator.SUM_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.PROD_STR, CalculusOperator.PROD_DESC, CalculusOperator.PROD_ID, CalculusOperator.PROD_SYN, CalculusOperator.PROD_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.INT_STR, CalculusOperator.INT_DESC, CalculusOperator.INT_ID, CalculusOperator.INT_SYN, CalculusOperator.INT_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.DER_STR, CalculusOperator.DER_DESC, CalculusOperator.DER_ID, CalculusOperator.DER_SYN, CalculusOperator.DER_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.DER_LEFT_STR, CalculusOperator.DER_LEFT_DESC, CalculusOperator.DER_LEFT_ID, CalculusOperator.DER_LEFT_SYN, CalculusOperator.DER_LEFT_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.DER_RIGHT_STR, CalculusOperator.DER_RIGHT_DESC, CalculusOperator.DER_RIGHT_ID, CalculusOperator.DER_RIGHT_SYN, CalculusOperator.DER_RIGHT_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.DERN_STR, CalculusOperator.DERN_DESC, CalculusOperator.DERN_ID, CalculusOperator.DERN_SYN, CalculusOperator.DERN_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.FORW_DIFF_STR, CalculusOperator.FORW_DIFF_DESC, CalculusOperator.FORW_DIFF_ID, CalculusOperator.FORW_DIFF_SYN, CalculusOperator.FORW_DIFF_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.BACKW_DIFF_STR, CalculusOperator.BACKW_DIFF_DESC, CalculusOperator.BACKW_DIFF_ID, CalculusOperator.BACKW_DIFF_SYN, CalculusOperator.BACKW_DIFF_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.AVG_STR, CalculusOperator.AVG_DESC, CalculusOperator.AVG_ID, CalculusOperator.AVG_SYN, CalculusOperator.AVG_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.VAR_STR, CalculusOperator.VAR_DESC, CalculusOperator.VAR_ID, CalculusOperator.VAR_SYN, CalculusOperator.VAR_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.STD_STR, CalculusOperator.STD_DESC, CalculusOperator.STD_ID, CalculusOperator.STD_SYN, CalculusOperator.STD_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.MIN_STR, CalculusOperator.MIN_DESC, CalculusOperator.MIN_ID, CalculusOperator.MIN_SYN, CalculusOperator.MIN_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.MAX_STR, CalculusOperator.MAX_DESC, CalculusOperator.MAX_ID, CalculusOperator.MAX_SYN, CalculusOperator.MAX_SINCE, CalculusOperator.TYPE_ID);
+				addKeyWord(CalculusOperator.SOLVE_STR, CalculusOperator.SOLVE_DESC, CalculusOperator.SOLVE_ID, CalculusOperator.SOLVE_SYN, CalculusOperator.SOLVE_SINCE, CalculusOperator.TYPE_ID);
 				/*
 				 * Constants key words
 				 */
-				addKeyWord(ConstantValue.PI_STR, ConstantValue.PI_DESC, ConstantValue.PI_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.EULER_STR, ConstantValue.EULER_DESC, ConstantValue.EULER_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.EULER_MASCHERONI_STR, ConstantValue.EULER_MASCHERONI_DESC, ConstantValue.EULER_MASCHERONI_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.GOLDEN_RATIO_STR, ConstantValue.GOLDEN_RATIO_DESC, ConstantValue.GOLDEN_RATIO_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.PLASTIC_STR, ConstantValue.PLASTIC_DESC, ConstantValue.PLASTIC_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.EMBREE_TREFETHEN_STR, ConstantValue.EMBREE_TREFETHEN_DESC, ConstantValue.EMBREE_TREFETHEN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.FEIGENBAUM_DELTA_STR, ConstantValue.FEIGENBAUM_DELTA_DESC, ConstantValue.FEIGENBAUM_DELTA_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.FEIGENBAUM_ALFA_STR, ConstantValue.FEIGENBAUM_ALFA_DESC, ConstantValue.FEIGENBAUM_ALFA_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.TWIN_PRIME_STR, ConstantValue.TWIN_PRIME_DESC, ConstantValue.TWIN_PRIME_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.MEISSEL_MERTEENS_STR, ConstantValue.MEISSEL_MERTEENS_DESC, ConstantValue.MEISSEL_MERTEENS_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.BRAUN_TWIN_PRIME_STR, ConstantValue.BRAUN_TWIN_PRIME_DESC, ConstantValue.BRAUN_TWIN_PRIME_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.BRAUN_PRIME_QUADR_STR, ConstantValue.BRAUN_PRIME_QUADR_DESC, ConstantValue.BRAUN_PRIME_QUADR_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.BRUIJN_NEWMAN_STR, ConstantValue.BRUIJN_NEWMAN_DESC, ConstantValue.BRUIJN_NEWMAN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.CATALAN_STR, ConstantValue.CATALAN_DESC, ConstantValue.CATALAN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LANDAU_RAMANUJAN_STR, ConstantValue.LANDAU_RAMANUJAN_DESC, ConstantValue.LANDAU_RAMANUJAN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.VISWANATH_STR, ConstantValue.VISWANATH_DESC, ConstantValue.VISWANATH_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LEGENDRE_STR, ConstantValue.LEGENDRE_DESC, ConstantValue.LEGENDRE_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.RAMANUJAN_SOLDNER_STR, ConstantValue.RAMANUJAN_SOLDNER_DESC, ConstantValue.RAMANUJAN_SOLDNER_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.ERDOS_BORWEIN_STR, ConstantValue.ERDOS_BORWEIN_DESC, ConstantValue.ERDOS_BORWEIN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.BERNSTEIN_STR, ConstantValue.BERNSTEIN_DESC, ConstantValue.BERNSTEIN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.GAUSS_KUZMIN_WIRSING_STR, ConstantValue.GAUSS_KUZMIN_WIRSING_DESC, ConstantValue.GAUSS_KUZMIN_WIRSING_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.HAFNER_SARNAK_MCCURLEY_STR, ConstantValue.HAFNER_SARNAK_MCCURLEY_DESC, ConstantValue.HAFNER_SARNAK_MCCURLEY_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.GOLOMB_DICKMAN_STR, ConstantValue.GOLOMB_DICKMAN_DESC, ConstantValue.GOLOMB_DICKMAN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.CAHEN_STR, ConstantValue.CAHEN_DESC, ConstantValue.CAHEN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LAPLACE_LIMIT_STR, ConstantValue.LAPLACE_LIMIT_DESC, ConstantValue.LAPLACE_LIMIT_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.ALLADI_GRINSTEAD_STR, ConstantValue.ALLADI_GRINSTEAD_DESC, ConstantValue.ALLADI_GRINSTEAD_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LENGYEL_STR, ConstantValue.LENGYEL_DESC, ConstantValue.LENGYEL_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LEVY_STR, ConstantValue.LEVY_DESC, ConstantValue.LEVY_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.APERY_STR, ConstantValue.APERY_DESC, ConstantValue.APERY_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.MILLS_STR, ConstantValue.MILLS_DESC, ConstantValue.MILLS_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.BACKHOUSE_STR, ConstantValue.BACKHOUSE_DESC, ConstantValue.BACKHOUSE_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.PORTER_STR, ConstantValue.PORTER_DESC, ConstantValue.PORTER_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LIEB_QUARE_ICE_STR, ConstantValue.LIEB_QUARE_ICE_DESC, ConstantValue.LIEB_QUARE_ICE_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.NIVEN_STR, ConstantValue.NIVEN_DESC, ConstantValue.NIVEN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.SIERPINSKI_STR, ConstantValue.SIERPINSKI_DESC, ConstantValue.SIERPINSKI_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.KHINCHIN_STR, ConstantValue.KHINCHIN_DESC, ConstantValue.KHINCHIN_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.FRANSEN_ROBINSON_STR, ConstantValue.FRANSEN_ROBINSON_DESC, ConstantValue.FRANSEN_ROBINSON_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LANDAU_STR, ConstantValue.LANDAU_DESC, ConstantValue.LANDAU_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.PARABOLIC_STR, ConstantValue.PARABOLIC_DESC, ConstantValue.PARABOLIC_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.OMEGA_STR, ConstantValue.OMEGA_DESC, ConstantValue.OMEGA_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.MRB_STR, ConstantValue.MRB_DESC, ConstantValue.MRB_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.LI2_STR, ConstantValue.LI2_DESC, ConstantValue.LI2_ID, ConstantValue.TYPE_ID);
-				addKeyWord(ConstantValue.GOMPERTZ_STR, ConstantValue.GOMPERTZ_DESC, ConstantValue.GOMPERTZ_ID, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PI_STR, ConstantValue.PI_DESC, ConstantValue.PI_ID, ConstantValue.PI_SYN, ConstantValue.PI_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EULER_STR, ConstantValue.EULER_DESC, ConstantValue.EULER_ID, ConstantValue.EULER_SYN, ConstantValue.EULER_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EULER_MASCHERONI_STR, ConstantValue.EULER_MASCHERONI_DESC, ConstantValue.EULER_MASCHERONI_ID, ConstantValue.EULER_MASCHERONI_SYN, ConstantValue.EULER_MASCHERONI_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.GOLDEN_RATIO_STR, ConstantValue.GOLDEN_RATIO_DESC, ConstantValue.GOLDEN_RATIO_ID, ConstantValue.GOLDEN_RATIO_SYN, ConstantValue.GOLDEN_RATIO_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PLASTIC_STR, ConstantValue.PLASTIC_DESC, ConstantValue.PLASTIC_ID, ConstantValue.PLASTIC_SYN, ConstantValue.PLASTIC_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EMBREE_TREFETHEN_STR, ConstantValue.EMBREE_TREFETHEN_DESC, ConstantValue.EMBREE_TREFETHEN_ID, ConstantValue.EMBREE_TREFETHEN_SYN, ConstantValue.EMBREE_TREFETHEN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.FEIGENBAUM_DELTA_STR, ConstantValue.FEIGENBAUM_DELTA_DESC, ConstantValue.FEIGENBAUM_DELTA_ID, ConstantValue.FEIGENBAUM_DELTA_SYN, ConstantValue.FEIGENBAUM_DELTA_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.FEIGENBAUM_ALFA_STR, ConstantValue.FEIGENBAUM_ALFA_DESC, ConstantValue.FEIGENBAUM_ALFA_ID, ConstantValue.FEIGENBAUM_ALFA_SYN, ConstantValue.FEIGENBAUM_ALFA_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.TWIN_PRIME_STR, ConstantValue.TWIN_PRIME_DESC, ConstantValue.TWIN_PRIME_ID, ConstantValue.TWIN_PRIME_SYN, ConstantValue.TWIN_PRIME_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MEISSEL_MERTEENS_STR, ConstantValue.MEISSEL_MERTEENS_DESC, ConstantValue.MEISSEL_MERTEENS_ID, ConstantValue.MEISSEL_MERTEENS_SYN, ConstantValue.MEISSEL_MERTEENS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.BRAUN_TWIN_PRIME_STR, ConstantValue.BRAUN_TWIN_PRIME_DESC, ConstantValue.BRAUN_TWIN_PRIME_ID, ConstantValue.BRAUN_TWIN_PRIME_SYN, ConstantValue.BRAUN_TWIN_PRIME_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.BRAUN_PRIME_QUADR_STR, ConstantValue.BRAUN_PRIME_QUADR_DESC, ConstantValue.BRAUN_PRIME_QUADR_ID, ConstantValue.BRAUN_PRIME_QUADR_SYN, ConstantValue.BRAUN_PRIME_QUADR_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.BRUIJN_NEWMAN_STR, ConstantValue.BRUIJN_NEWMAN_DESC, ConstantValue.BRUIJN_NEWMAN_ID, ConstantValue.BRUIJN_NEWMAN_SYN, ConstantValue.BRUIJN_NEWMAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.CATALAN_STR, ConstantValue.CATALAN_DESC, ConstantValue.CATALAN_ID, ConstantValue.CATALAN_SYN, ConstantValue.CATALAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LANDAU_RAMANUJAN_STR, ConstantValue.LANDAU_RAMANUJAN_DESC, ConstantValue.LANDAU_RAMANUJAN_ID, ConstantValue.LANDAU_RAMANUJAN_SYN, ConstantValue.LANDAU_RAMANUJAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.VISWANATH_STR, ConstantValue.VISWANATH_DESC, ConstantValue.VISWANATH_ID, ConstantValue.VISWANATH_SYN, ConstantValue.VISWANATH_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LEGENDRE_STR, ConstantValue.LEGENDRE_DESC, ConstantValue.LEGENDRE_ID, ConstantValue.LEGENDRE_SYN, ConstantValue.LEGENDRE_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.RAMANUJAN_SOLDNER_STR, ConstantValue.RAMANUJAN_SOLDNER_DESC, ConstantValue.RAMANUJAN_SOLDNER_ID, ConstantValue.RAMANUJAN_SOLDNER_SYN, ConstantValue.RAMANUJAN_SOLDNER_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.ERDOS_BORWEIN_STR, ConstantValue.ERDOS_BORWEIN_DESC, ConstantValue.ERDOS_BORWEIN_ID, ConstantValue.ERDOS_BORWEIN_SYN, ConstantValue.ERDOS_BORWEIN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.BERNSTEIN_STR, ConstantValue.BERNSTEIN_DESC, ConstantValue.BERNSTEIN_ID, ConstantValue.BERNSTEIN_SYN, ConstantValue.BERNSTEIN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.GAUSS_KUZMIN_WIRSING_STR, ConstantValue.GAUSS_KUZMIN_WIRSING_DESC, ConstantValue.GAUSS_KUZMIN_WIRSING_ID, ConstantValue.GAUSS_KUZMIN_WIRSING_SYN, ConstantValue.GAUSS_KUZMIN_WIRSING_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.HAFNER_SARNAK_MCCURLEY_STR, ConstantValue.HAFNER_SARNAK_MCCURLEY_DESC, ConstantValue.HAFNER_SARNAK_MCCURLEY_ID, ConstantValue.HAFNER_SARNAK_MCCURLEY_SYN, ConstantValue.HAFNER_SARNAK_MCCURLEY_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.GOLOMB_DICKMAN_STR, ConstantValue.GOLOMB_DICKMAN_DESC, ConstantValue.GOLOMB_DICKMAN_ID, ConstantValue.GOLOMB_DICKMAN_SYN, ConstantValue.GOLOMB_DICKMAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.CAHEN_STR, ConstantValue.CAHEN_DESC, ConstantValue.CAHEN_ID, ConstantValue.CAHEN_SYN, ConstantValue.CAHEN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LAPLACE_LIMIT_STR, ConstantValue.LAPLACE_LIMIT_DESC, ConstantValue.LAPLACE_LIMIT_ID, ConstantValue.LAPLACE_LIMIT_SYN, ConstantValue.LAPLACE_LIMIT_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.ALLADI_GRINSTEAD_STR, ConstantValue.ALLADI_GRINSTEAD_DESC, ConstantValue.ALLADI_GRINSTEAD_ID, ConstantValue.ALLADI_GRINSTEAD_SYN, ConstantValue.ALLADI_GRINSTEAD_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LENGYEL_STR, ConstantValue.LENGYEL_DESC, ConstantValue.LENGYEL_ID, ConstantValue.LENGYEL_SYN, ConstantValue.LENGYEL_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LEVY_STR, ConstantValue.LEVY_DESC, ConstantValue.LEVY_ID, ConstantValue.LEVY_SYN, ConstantValue.LEVY_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.APERY_STR, ConstantValue.APERY_DESC, ConstantValue.APERY_ID, ConstantValue.APERY_SYN, ConstantValue.APERY_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MILLS_STR, ConstantValue.MILLS_DESC, ConstantValue.MILLS_ID, ConstantValue.MILLS_SYN, ConstantValue.MILLS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.BACKHOUSE_STR, ConstantValue.BACKHOUSE_DESC, ConstantValue.BACKHOUSE_ID, ConstantValue.BACKHOUSE_SYN, ConstantValue.BACKHOUSE_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PORTER_STR, ConstantValue.PORTER_DESC, ConstantValue.PORTER_ID, ConstantValue.PORTER_SYN, ConstantValue.PORTER_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LIEB_QUARE_ICE_STR, ConstantValue.LIEB_QUARE_ICE_DESC, ConstantValue.LIEB_QUARE_ICE_ID, ConstantValue.LIEB_QUARE_ICE_SYN, ConstantValue.LIEB_QUARE_ICE_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.NIVEN_STR, ConstantValue.NIVEN_DESC, ConstantValue.NIVEN_ID, ConstantValue.NIVEN_SYN, ConstantValue.NIVEN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.SIERPINSKI_STR, ConstantValue.SIERPINSKI_DESC, ConstantValue.SIERPINSKI_ID, ConstantValue.SIERPINSKI_SYN, ConstantValue.SIERPINSKI_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.KHINCHIN_STR, ConstantValue.KHINCHIN_DESC, ConstantValue.KHINCHIN_ID, ConstantValue.KHINCHIN_SYN, ConstantValue.KHINCHIN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.FRANSEN_ROBINSON_STR, ConstantValue.FRANSEN_ROBINSON_DESC, ConstantValue.FRANSEN_ROBINSON_ID, ConstantValue.FRANSEN_ROBINSON_SYN, ConstantValue.FRANSEN_ROBINSON_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LANDAU_STR, ConstantValue.LANDAU_DESC, ConstantValue.LANDAU_ID, ConstantValue.LANDAU_SYN, ConstantValue.LANDAU_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PARABOLIC_STR, ConstantValue.PARABOLIC_DESC, ConstantValue.PARABOLIC_ID, ConstantValue.PARABOLIC_SYN, ConstantValue.PARABOLIC_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.OMEGA_STR, ConstantValue.OMEGA_DESC, ConstantValue.OMEGA_ID, ConstantValue.OMEGA_SYN, ConstantValue.OMEGA_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MRB_STR, ConstantValue.MRB_DESC, ConstantValue.MRB_ID, ConstantValue.MRB_SYN, ConstantValue.MRB_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.LI2_STR, ConstantValue.LI2_DESC, ConstantValue.LI2_ID, ConstantValue.LI2_SYN, ConstantValue.LI2_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.GOMPERTZ_STR, ConstantValue.GOMPERTZ_DESC, ConstantValue.GOMPERTZ_ID, ConstantValue.GOMPERTZ_SYN, ConstantValue.GOMPERTZ_SINCE, ConstantValue.TYPE_ID);
+				/* Physical Constants */
+				addKeyWord(ConstantValue.LIGHT_SPEED_STR, ConstantValue.LIGHT_SPEED_DESC, ConstantValue.LIGHT_SPEED_ID, ConstantValue.LIGHT_SPEED_SYN, ConstantValue.LIGHT_SPEED_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.GRAVITATIONAL_CONSTANT_STR, ConstantValue.GRAVITATIONAL_CONSTANT_DESC, ConstantValue.GRAVITATIONAL_CONSTANT_ID, ConstantValue.GRAVITATIONAL_CONSTANT_SYN, ConstantValue.GRAVITATIONAL_CONSTANT_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.GRAVIT_ACC_EARTH_STR, ConstantValue.GRAVIT_ACC_EARTH_DESC, ConstantValue.GRAVIT_ACC_EARTH_ID, ConstantValue.GRAVIT_ACC_EARTH_SYN, ConstantValue.GRAVIT_ACC_EARTH_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PLANCK_CONSTANT_STR, ConstantValue.PLANCK_CONSTANT_DESC, ConstantValue.PLANCK_CONSTANT_ID, ConstantValue.PLANCK_CONSTANT_SYN, ConstantValue.PLANCK_CONSTANT_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PLANCK_CONSTANT_REDUCED_STR, ConstantValue.PLANCK_CONSTANT_REDUCED_DESC, ConstantValue.PLANCK_CONSTANT_REDUCED_ID, ConstantValue.PLANCK_CONSTANT_REDUCED_SYN, ConstantValue.PLANCK_CONSTANT_REDUCED_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PLANCK_LENGTH_STR, ConstantValue.PLANCK_LENGTH_DESC, ConstantValue.PLANCK_LENGTH_ID, ConstantValue.PLANCK_LENGTH_SYN, ConstantValue.PLANCK_LENGTH_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PLANCK_MASS_STR, ConstantValue.PLANCK_MASS_DESC, ConstantValue.PLANCK_MASS_ID, ConstantValue.PLANCK_MASS_SYN, ConstantValue.PLANCK_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PLANCK_TIME_STR, ConstantValue.PLANCK_TIME_DESC, ConstantValue.PLANCK_TIME_ID, ConstantValue.PLANCK_TIME_SYN, ConstantValue.PLANCK_TIME_SINCE, ConstantValue.TYPE_ID);
+				/* Astronomical Constants */
+				addKeyWord(ConstantValue.LIGHT_YEAR_STR, ConstantValue.LIGHT_YEAR_DESC, ConstantValue.LIGHT_YEAR_ID, ConstantValue.LIGHT_YEAR_SYN, ConstantValue.LIGHT_YEAR_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.ASTRONOMICAL_UNIT_STR, ConstantValue.ASTRONOMICAL_UNIT_DESC, ConstantValue.ASTRONOMICAL_UNIT_ID, ConstantValue.ASTRONOMICAL_UNIT_SYN, ConstantValue.ASTRONOMICAL_UNIT_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.PARSEC_STR, ConstantValue.PARSEC_DESC, ConstantValue.PARSEC_ID, ConstantValue.PARSEC_SYN, ConstantValue.PARSEC_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.KILOPARSEC_STR, ConstantValue.KILOPARSEC_DESC, ConstantValue.KILOPARSEC_ID, ConstantValue.KILOPARSEC_SYN, ConstantValue.KILOPARSEC_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EARTH_RADIUS_EQUATORIAL_STR, ConstantValue.EARTH_RADIUS_EQUATORIAL_DESC, ConstantValue.EARTH_RADIUS_EQUATORIAL_ID, ConstantValue.EARTH_RADIUS_EQUATORIAL_SYN, ConstantValue.EARTH_RADIUS_EQUATORIAL_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EARTH_RADIUS_POLAR_STR, ConstantValue.EARTH_RADIUS_POLAR_DESC, ConstantValue.EARTH_RADIUS_POLAR_ID, ConstantValue.EARTH_RADIUS_POLAR_SYN, ConstantValue.EARTH_RADIUS_POLAR_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EARTH_RADIUS_MEAN_STR, ConstantValue.EARTH_RADIUS_MEAN_DESC, ConstantValue.EARTH_RADIUS_MEAN_ID, ConstantValue.EARTH_RADIUS_MEAN_SYN, ConstantValue.EARTH_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EARTH_MASS_STR, ConstantValue.EARTH_MASS_DESC, ConstantValue.EARTH_MASS_ID, ConstantValue.EARTH_MASS_SYN, ConstantValue.EARTH_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.EARTH_SEMI_MAJOR_AXIS_STR, ConstantValue.EARTH_SEMI_MAJOR_AXIS_DESC, ConstantValue.EARTH_SEMI_MAJOR_AXIS_ID, ConstantValue.EARTH_SEMI_MAJOR_AXIS_SYN, ConstantValue.EARTH_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MOON_RADIUS_MEAN_STR, ConstantValue.MOON_RADIUS_MEAN_DESC, ConstantValue.MOON_RADIUS_MEAN_ID, ConstantValue.MOON_RADIUS_MEAN_SYN, ConstantValue.MOON_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MOON_MASS_STR, ConstantValue.MOON_MASS_DESC, ConstantValue.MOON_MASS_ID, ConstantValue.MOON_MASS_SYN, ConstantValue.MOON_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MONN_SEMI_MAJOR_AXIS_STR, ConstantValue.MONN_SEMI_MAJOR_AXIS_DESC, ConstantValue.MONN_SEMI_MAJOR_AXIS_ID, ConstantValue.MONN_SEMI_MAJOR_AXIS_SYN, ConstantValue.MONN_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.SOLAR_RADIUS_STR, ConstantValue.SOLAR_RADIUS_DESC, ConstantValue.SOLAR_RADIUS_ID, ConstantValue.SOLAR_RADIUS_SYN, ConstantValue.SOLAR_RADIUS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.SOLAR_MASS_STR, ConstantValue.SOLAR_MASS_DESC, ConstantValue.SOLAR_MASS_ID, ConstantValue.SOLAR_MASS_SYN, ConstantValue.SOLAR_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MERCURY_RADIUS_MEAN_STR, ConstantValue.MERCURY_RADIUS_MEAN_DESC, ConstantValue.MERCURY_RADIUS_MEAN_ID, ConstantValue.MERCURY_RADIUS_MEAN_SYN, ConstantValue.MERCURY_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MERCURY_MASS_STR, ConstantValue.MERCURY_MASS_DESC, ConstantValue.MERCURY_MASS_ID, ConstantValue.MERCURY_MASS_SYN, ConstantValue.MERCURY_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MERCURY_SEMI_MAJOR_AXIS_STR, ConstantValue.MERCURY_SEMI_MAJOR_AXIS_DESC, ConstantValue.MERCURY_SEMI_MAJOR_AXIS_ID, ConstantValue.MERCURY_SEMI_MAJOR_AXIS_SYN, ConstantValue.MERCURY_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.VENUS_RADIUS_MEAN_STR, ConstantValue.VENUS_RADIUS_MEAN_DESC, ConstantValue.VENUS_RADIUS_MEAN_ID, ConstantValue.VENUS_RADIUS_MEAN_SYN, ConstantValue.VENUS_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.VENUS_MASS_STR, ConstantValue.VENUS_MASS_DESC, ConstantValue.VENUS_MASS_ID, ConstantValue.VENUS_MASS_SYN, ConstantValue.VENUS_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.VENUS_SEMI_MAJOR_AXIS_STR, ConstantValue.VENUS_SEMI_MAJOR_AXIS_DESC, ConstantValue.VENUS_SEMI_MAJOR_AXIS_ID, ConstantValue.VENUS_SEMI_MAJOR_AXIS_SYN, ConstantValue.VENUS_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MARS_RADIUS_MEAN_STR, ConstantValue.MARS_RADIUS_MEAN_DESC, ConstantValue.MARS_RADIUS_MEAN_ID, ConstantValue.MARS_RADIUS_MEAN_SYN, ConstantValue.MARS_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MARS_MASS_STR, ConstantValue.MARS_MASS_DESC, ConstantValue.MARS_MASS_ID, ConstantValue.MARS_MASS_SYN, ConstantValue.MARS_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.MARS_SEMI_MAJOR_AXIS_STR, ConstantValue.MARS_SEMI_MAJOR_AXIS_DESC, ConstantValue.MARS_SEMI_MAJOR_AXIS_ID, ConstantValue.MARS_SEMI_MAJOR_AXIS_SYN, ConstantValue.MARS_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.JUPITER_RADIUS_MEAN_STR, ConstantValue.JUPITER_RADIUS_MEAN_DESC, ConstantValue.JUPITER_RADIUS_MEAN_ID, ConstantValue.JUPITER_RADIUS_MEAN_SYN, ConstantValue.JUPITER_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.JUPITER_MASS_STR, ConstantValue.JUPITER_MASS_DESC, ConstantValue.JUPITER_MASS_ID, ConstantValue.JUPITER_MASS_SYN, ConstantValue.JUPITER_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.JUPITER_SEMI_MAJOR_AXIS_STR, ConstantValue.JUPITER_SEMI_MAJOR_AXIS_DESC, ConstantValue.JUPITER_SEMI_MAJOR_AXIS_ID, ConstantValue.JUPITER_SEMI_MAJOR_AXIS_SYN, ConstantValue.JUPITER_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.SATURN_RADIUS_MEAN_STR, ConstantValue.SATURN_RADIUS_MEAN_DESC, ConstantValue.SATURN_RADIUS_MEAN_ID, ConstantValue.SATURN_RADIUS_MEAN_SYN, ConstantValue.SATURN_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.SATURN_MASS_STR, ConstantValue.SATURN_MASS_DESC, ConstantValue.SATURN_MASS_ID, ConstantValue.SATURN_MASS_SYN, ConstantValue.SATURN_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.SATURN_SEMI_MAJOR_AXIS_STR, ConstantValue.SATURN_SEMI_MAJOR_AXIS_DESC, ConstantValue.SATURN_SEMI_MAJOR_AXIS_ID, ConstantValue.SATURN_SEMI_MAJOR_AXIS_SYN, ConstantValue.SATURN_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.URANUS_RADIUS_MEAN_STR, ConstantValue.URANUS_RADIUS_MEAN_DESC, ConstantValue.URANUS_RADIUS_MEAN_ID, ConstantValue.URANUS_RADIUS_MEAN_SYN, ConstantValue.URANUS_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.URANUS_MASS_STR, ConstantValue.URANUS_MASS_DESC, ConstantValue.URANUS_MASS_ID, ConstantValue.URANUS_MASS_SYN, ConstantValue.URANUS_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.URANUS_SEMI_MAJOR_AXIS_STR, ConstantValue.URANUS_SEMI_MAJOR_AXIS_DESC, ConstantValue.URANUS_SEMI_MAJOR_AXIS_ID, ConstantValue.URANUS_SEMI_MAJOR_AXIS_SYN, ConstantValue.URANUS_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.NEPTUNE_RADIUS_MEAN_STR, ConstantValue.NEPTUNE_RADIUS_MEAN_DESC, ConstantValue.NEPTUNE_RADIUS_MEAN_ID, ConstantValue.NEPTUNE_RADIUS_MEAN_SYN, ConstantValue.NEPTUNE_RADIUS_MEAN_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.NEPTUNE_MASS_STR, ConstantValue.NEPTUNE_MASS_DESC, ConstantValue.NEPTUNE_MASS_ID, ConstantValue.NEPTUNE_MASS_SYN, ConstantValue.NEPTUNE_MASS_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.NEPTUNE_SEMI_MAJOR_AXIS_STR, ConstantValue.NEPTUNE_SEMI_MAJOR_AXIS_DESC, ConstantValue.NEPTUNE_SEMI_MAJOR_AXIS_ID, ConstantValue.NEPTUNE_SEMI_MAJOR_AXIS_SYN, ConstantValue.NEPTUNE_SEMI_MAJOR_AXIS_SINCE, ConstantValue.TYPE_ID);
+				/* boolean */
+				addKeyWord(ConstantValue.TRUE_STR, ConstantValue.TRUE_DESC, ConstantValue.TRUE_ID, ConstantValue.TRUE_SYN, ConstantValue.TRUE_SINCE, ConstantValue.TYPE_ID);
+				addKeyWord(ConstantValue.FALSE_STR, ConstantValue.FALSE_DESC, ConstantValue.FALSE_ID, ConstantValue.FALSE_SYN, ConstantValue.FALSE_SINCE, ConstantValue.TYPE_ID);
+				/* other */
+				addKeyWord(ConstantValue.NAN_STR, ConstantValue.NAN_DESC, ConstantValue.NAN_ID, ConstantValue.NAN_SYN, ConstantValue.NAN_SINCE, ConstantValue.TYPE_ID);
 				/*
 				 * Random variables
 				 */
-				addKeyWord(RandomVariable.UNIFORM_STR, RandomVariable.UNIFORM_DESC, RandomVariable.UNIFORM_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT_STR, RandomVariable.INT_DESC, RandomVariable.INT_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT1_STR, RandomVariable.INT1_DESC, RandomVariable.INT1_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT2_STR, RandomVariable.INT2_DESC, RandomVariable.INT2_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT3_STR, RandomVariable.INT3_DESC, RandomVariable.INT3_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT4_STR, RandomVariable.INT4_DESC, RandomVariable.INT4_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT5_STR, RandomVariable.INT5_DESC, RandomVariable.INT5_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT6_STR, RandomVariable.INT6_DESC, RandomVariable.INT6_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT7_STR, RandomVariable.INT7_DESC, RandomVariable.INT7_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT8_STR, RandomVariable.INT8_DESC, RandomVariable.INT8_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.INT9_STR, RandomVariable.INT9_DESC, RandomVariable.INT9_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_STR, RandomVariable.NAT0_DESC, RandomVariable.NAT0_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_1_STR, RandomVariable.NAT0_1_DESC, RandomVariable.NAT0_1_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_2_STR, RandomVariable.NAT0_2_DESC, RandomVariable.NAT0_2_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_3_STR, RandomVariable.NAT0_3_DESC, RandomVariable.NAT0_3_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_4_STR, RandomVariable.NAT0_4_DESC, RandomVariable.NAT0_4_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_5_STR, RandomVariable.NAT0_5_DESC, RandomVariable.NAT0_5_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_6_STR, RandomVariable.NAT0_6_DESC, RandomVariable.NAT0_6_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_7_STR, RandomVariable.NAT0_7_DESC, RandomVariable.NAT0_7_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_8_STR, RandomVariable.NAT0_8_DESC, RandomVariable.NAT0_8_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT0_9_STR, RandomVariable.NAT0_9_DESC, RandomVariable.NAT0_9_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_STR, RandomVariable.NAT1_DESC, RandomVariable.NAT1_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_1_STR, RandomVariable.NAT1_1_DESC, RandomVariable.NAT1_1_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_2_STR, RandomVariable.NAT1_2_DESC, RandomVariable.NAT1_2_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_3_STR, RandomVariable.NAT1_3_DESC, RandomVariable.NAT1_3_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_4_STR, RandomVariable.NAT1_4_DESC, RandomVariable.NAT1_4_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_5_STR, RandomVariable.NAT1_5_DESC, RandomVariable.NAT1_5_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_6_STR, RandomVariable.NAT1_6_DESC, RandomVariable.NAT1_6_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_7_STR, RandomVariable.NAT1_7_DESC, RandomVariable.NAT1_7_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_8_STR, RandomVariable.NAT1_8_DESC, RandomVariable.NAT1_8_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NAT1_9_STR, RandomVariable.NAT1_9_DESC, RandomVariable.NAT1_9_ID, RandomVariable.TYPE_ID);
-				addKeyWord(RandomVariable.NOR_STR, RandomVariable.NOR_DESC, RandomVariable.NOR_ID, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.UNIFORM_STR, RandomVariable.UNIFORM_DESC, RandomVariable.UNIFORM_ID, RandomVariable.UNIFORM_SYN, RandomVariable.UNIFORM_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT_STR, RandomVariable.INT_DESC, RandomVariable.INT_ID, RandomVariable.INT_SYN, RandomVariable.INT_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT1_STR, RandomVariable.INT1_DESC, RandomVariable.INT1_ID, RandomVariable.INT1_SYN, RandomVariable.INT1_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT2_STR, RandomVariable.INT2_DESC, RandomVariable.INT2_ID, RandomVariable.INT2_SYN, RandomVariable.INT2_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT3_STR, RandomVariable.INT3_DESC, RandomVariable.INT3_ID, RandomVariable.INT3_SYN, RandomVariable.INT3_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT4_STR, RandomVariable.INT4_DESC, RandomVariable.INT4_ID, RandomVariable.INT4_SYN, RandomVariable.INT4_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT5_STR, RandomVariable.INT5_DESC, RandomVariable.INT5_ID, RandomVariable.INT5_SYN, RandomVariable.INT5_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT6_STR, RandomVariable.INT6_DESC, RandomVariable.INT6_ID, RandomVariable.INT6_SYN, RandomVariable.INT6_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT7_STR, RandomVariable.INT7_DESC, RandomVariable.INT7_ID, RandomVariable.INT7_SYN, RandomVariable.INT7_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT8_STR, RandomVariable.INT8_DESC, RandomVariable.INT8_ID, RandomVariable.INT8_SYN, RandomVariable.INT8_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.INT9_STR, RandomVariable.INT9_DESC, RandomVariable.INT9_ID, RandomVariable.INT9_SYN, RandomVariable.INT9_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_STR, RandomVariable.NAT0_DESC, RandomVariable.NAT0_ID, RandomVariable.NAT0_SYN, RandomVariable.NAT0_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_1_STR, RandomVariable.NAT0_1_DESC, RandomVariable.NAT0_1_ID, RandomVariable.NAT0_1_SYN, RandomVariable.NAT0_1_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_2_STR, RandomVariable.NAT0_2_DESC, RandomVariable.NAT0_2_ID, RandomVariable.NAT0_2_SYN, RandomVariable.NAT0_2_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_3_STR, RandomVariable.NAT0_3_DESC, RandomVariable.NAT0_3_ID, RandomVariable.NAT0_3_SYN, RandomVariable.NAT0_3_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_4_STR, RandomVariable.NAT0_4_DESC, RandomVariable.NAT0_4_ID, RandomVariable.NAT0_4_SYN, RandomVariable.NAT0_4_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_5_STR, RandomVariable.NAT0_5_DESC, RandomVariable.NAT0_5_ID, RandomVariable.NAT0_5_SYN, RandomVariable.NAT0_5_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_6_STR, RandomVariable.NAT0_6_DESC, RandomVariable.NAT0_6_ID, RandomVariable.NAT0_6_SYN, RandomVariable.NAT0_6_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_7_STR, RandomVariable.NAT0_7_DESC, RandomVariable.NAT0_7_ID, RandomVariable.NAT0_7_SYN, RandomVariable.NAT0_7_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_8_STR, RandomVariable.NAT0_8_DESC, RandomVariable.NAT0_8_ID, RandomVariable.NAT0_8_SYN, RandomVariable.NAT0_8_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT0_9_STR, RandomVariable.NAT0_9_DESC, RandomVariable.NAT0_9_ID, RandomVariable.NAT0_9_SYN, RandomVariable.NAT0_9_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_STR, RandomVariable.NAT1_DESC, RandomVariable.NAT1_ID, RandomVariable.NAT1_SYN, RandomVariable.NAT1_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_1_STR, RandomVariable.NAT1_1_DESC, RandomVariable.NAT1_1_ID, RandomVariable.NAT1_1_SYN, RandomVariable.NAT1_1_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_2_STR, RandomVariable.NAT1_2_DESC, RandomVariable.NAT1_2_ID, RandomVariable.NAT1_2_SYN, RandomVariable.NAT1_2_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_3_STR, RandomVariable.NAT1_3_DESC, RandomVariable.NAT1_3_ID, RandomVariable.NAT1_3_SYN, RandomVariable.NAT1_3_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_4_STR, RandomVariable.NAT1_4_DESC, RandomVariable.NAT1_4_ID, RandomVariable.NAT1_4_SYN, RandomVariable.NAT1_4_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_5_STR, RandomVariable.NAT1_5_DESC, RandomVariable.NAT1_5_ID, RandomVariable.NAT1_5_SYN, RandomVariable.NAT1_5_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_6_STR, RandomVariable.NAT1_6_DESC, RandomVariable.NAT1_6_ID, RandomVariable.NAT1_6_SYN, RandomVariable.NAT1_6_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_7_STR, RandomVariable.NAT1_7_DESC, RandomVariable.NAT1_7_ID, RandomVariable.NAT1_7_SYN, RandomVariable.NAT1_7_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_8_STR, RandomVariable.NAT1_8_DESC, RandomVariable.NAT1_8_ID, RandomVariable.NAT1_8_SYN, RandomVariable.NAT1_8_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NAT1_9_STR, RandomVariable.NAT1_9_DESC, RandomVariable.NAT1_9_ID, RandomVariable.NAT1_9_SYN, RandomVariable.NAT1_9_SINCE, RandomVariable.TYPE_ID);
+				addKeyWord(RandomVariable.NOR_STR, RandomVariable.NOR_DESC, RandomVariable.NOR_ID, RandomVariable.NOR_SYN, RandomVariable.NOR_SINCE, RandomVariable.TYPE_ID);
+				/*
+				 * BiteWise Operators
+				 */
+				addKeyWord(BitwiseOperator.COMPL_STR, BitwiseOperator.COMPL_DESC, BitwiseOperator.COMPL_ID, BitwiseOperator.COMPL_SYN, BitwiseOperator.COMPL_SINCE, BitwiseOperator.TYPE_ID);
+				addKeyWord(BitwiseOperator.AND_STR, BitwiseOperator.AND_DESC, BitwiseOperator.AND_ID, BitwiseOperator.AND_SYN, BitwiseOperator.AND_SINCE, BitwiseOperator.TYPE_ID);
+				addKeyWord(BitwiseOperator.XOR_STR, BitwiseOperator.XOR_DESC, BitwiseOperator.XOR_ID, BitwiseOperator.XOR_SYN, BitwiseOperator.XOR_SINCE, BitwiseOperator.TYPE_ID);
+				addKeyWord(BitwiseOperator.OR_STR, BitwiseOperator.OR_DESC, BitwiseOperator.OR_ID, BitwiseOperator.OR_SYN, BitwiseOperator.OR_SINCE, BitwiseOperator.TYPE_ID);
+				addKeyWord(BitwiseOperator.LEFT_SHIFT_STR, BitwiseOperator.LEFT_SHIFT_DESC, BitwiseOperator.LEFT_SHIFT_ID, BitwiseOperator.LEFT_SHIFT_SYN, BitwiseOperator.LEFT_SHIFT_SINCE, BitwiseOperator.TYPE_ID);
+				addKeyWord(BitwiseOperator.RIGHT_SHIFT_STR, BitwiseOperator.RIGHT_SHIFT_DESC, BitwiseOperator.RIGHT_SHIFT_ID, BitwiseOperator.RIGHT_SHIFT_SYN, BitwiseOperator.RIGHT_SHIFT_SINCE, BitwiseOperator.TYPE_ID);
+				/*
+				 * Units
+				 */
+				addKeyWord(Unit.PERC_STR, Unit.PERC_DESC, Unit.PERC_ID, Unit.PERC_SYN, Unit.PERC_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PROMIL_STR, Unit.PROMIL_DESC, Unit.PROMIL_ID, Unit.PROMIL_SYN, Unit.PROMIL_SINCE, Unit.TYPE_ID);
+				/* Metric prefixes */
+				addKeyWord(Unit.YOTTA_STR, Unit.YOTTA_DESC, Unit.YOTTA_ID, Unit.YOTTA_SYN, Unit.YOTTA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.YOTTA_SEPT_STR, Unit.YOTTA_DESC, Unit.YOTTA_ID, Unit.YOTTA_SEPT_SYN, Unit.YOTTA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ZETTA_STR, Unit.ZETTA_DESC, Unit.ZETTA_ID, Unit.ZETTA_SYN, Unit.ZETTA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ZETTA_SEXT_STR, Unit.ZETTA_DESC, Unit.ZETTA_ID, Unit.ZETTA_SEXT_SYN, Unit.ZETTA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.EXA_STR, Unit.EXA_DESC, Unit.EXA_ID, Unit.EXA_SYN, Unit.EXA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.EXA_QUINT_STR, Unit.EXA_DESC, Unit.EXA_ID, Unit.EXA_QUINT_SYN, Unit.EXA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PETA_STR, Unit.PETA_DESC, Unit.PETA_ID, Unit.PETA_SYN, Unit.PETA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PETA_QUAD_STR, Unit.PETA_DESC, Unit.PETA_ID, Unit.PETA_QUAD_SYN, Unit.PETA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.TERA_STR, Unit.TERA_DESC, Unit.TERA_ID, Unit.TERA_SYN, Unit.TERA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.TERA_TRIL_STR, Unit.TERA_DESC, Unit.TERA_ID, Unit.TERA_TRIL_SYN, Unit.TERA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GIGA_STR, Unit.GIGA_DESC, Unit.GIGA_ID, Unit.GIGA_SYN, Unit.GIGA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GIGA_BIL_STR, Unit.GIGA_DESC, Unit.GIGA_ID, Unit.GIGA_BIL_SYN, Unit.GIGA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MEGA_STR, Unit.MEGA_DESC, Unit.MEGA_ID, Unit.MEGA_SYN, Unit.MEGA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MEGA_MIL_STR, Unit.MEGA_DESC, Unit.MEGA_ID, Unit.MEGA_MIL_SYN, Unit.MEGA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILO_STR, Unit.KILO_DESC, Unit.KILO_ID, Unit.KILO_SYN, Unit.KILO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILO_TH_STR, Unit.KILO_DESC, Unit.KILO_ID, Unit.KILO_TH_SYN, Unit.KILO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.HECTO_STR, Unit.HECTO_DESC, Unit.HECTO_ID, Unit.HECTO_SYN, Unit.HECTO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.HECTO_HUND_STR, Unit.HECTO_DESC, Unit.HECTO_ID, Unit.HECTO_HUND_SYN, Unit.HECTO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.DECA_STR, Unit.DECA_DESC, Unit.DECA_ID, Unit.DECA_SYN, Unit.DECA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.DECA_TEN_STR, Unit.DECA_DESC, Unit.DECA_ID, Unit.DECA_TEN_SYN, Unit.DECA_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.DECI_STR, Unit.DECI_DESC, Unit.DECI_ID, Unit.DECI_SYN, Unit.DECI_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.CENTI_STR, Unit.CENTI_DESC, Unit.CENTI_ID, Unit.CENTI_SYN, Unit.CENTI_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILLI_STR, Unit.MILLI_DESC, Unit.MILLI_ID, Unit.MILLI_SYN, Unit.MILLI_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MICRO_STR, Unit.MICRO_DESC, Unit.MICRO_ID, Unit.MICRO_SYN, Unit.MICRO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.NANO_STR, Unit.NANO_DESC, Unit.NANO_ID, Unit.NANO_SYN, Unit.NANO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PICO_STR, Unit.PICO_DESC, Unit.PICO_ID, Unit.PICO_SYN, Unit.PICO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.FEMTO_STR, Unit.FEMTO_DESC, Unit.FEMTO_ID, Unit.FEMTO_SYN, Unit.FEMTO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ATTO_STR, Unit.ATTO_DESC, Unit.ATTO_ID, Unit.ATTO_SYN, Unit.ATTO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ZEPTO_STR, Unit.ZEPTO_DESC, Unit.ZEPTO_ID, Unit.ZEPTO_SYN, Unit.ZEPTO_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.YOCTO_STR, Unit.YOCTO_DESC, Unit.YOCTO_ID, Unit.YOCTO_SYN, Unit.YOCTO_SINCE, Unit.TYPE_ID);
+				/* Units of length / distance */
+				addKeyWord(Unit.METRE_STR, Unit.METRE_DESC, Unit.METRE_ID, Unit.METRE_SYN, Unit.METRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOMETRE_STR, Unit.KILOMETRE_DESC, Unit.KILOMETRE_ID, Unit.KILOMETRE_SYN, Unit.KILOMETRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.CENTIMETRE_STR, Unit.CENTIMETRE_DESC, Unit.CENTIMETRE_ID, Unit.CENTIMETRE_SYN, Unit.CENTIMETRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILLIMETRE_STR, Unit.MILLIMETRE_DESC, Unit.MILLIMETRE_ID, Unit.MILLIMETRE_SYN, Unit.MILLIMETRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.INCH_STR, Unit.INCH_DESC, Unit.INCH_ID, Unit.INCH_SYN, Unit.INCH_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.YARD_STR, Unit.YARD_DESC, Unit.YARD_ID, Unit.YARD_SYN, Unit.YARD_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.FEET_STR, Unit.FEET_DESC, Unit.FEET_ID, Unit.FEET_SYN, Unit.FEET_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILE_STR, Unit.MILE_DESC, Unit.MILE_ID, Unit.MILE_SYN, Unit.MILE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.NAUTICAL_MILE_STR, Unit.NAUTICAL_MILE_DESC, Unit.NAUTICAL_MILE_ID, Unit.NAUTICAL_MILE_SYN, Unit.NAUTICAL_MILE_SINCE, Unit.TYPE_ID);
+				/* Units of area */
+				addKeyWord(Unit.METRE2_STR, Unit.METRE2_DESC, Unit.METRE2_ID, Unit.METRE2_SYN, Unit.METRE2_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.CENTIMETRE2_STR, Unit.CENTIMETRE2_DESC, Unit.CENTIMETRE2_ID, Unit.CENTIMETRE2_SYN, Unit.CENTIMETRE2_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILLIMETRE2_STR, Unit.MILLIMETRE2_DESC, Unit.MILLIMETRE2_ID, Unit.MILLIMETRE2_SYN, Unit.MILLIMETRE2_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ARE_STR, Unit.ARE_DESC, Unit.ARE_ID, Unit.ARE_SYN, Unit.ARE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.HECTARE_STR, Unit.HECTARE_DESC, Unit.HECTARE_ID, Unit.HECTARE_SYN, Unit.HECTARE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ACRE_STR, Unit.ACRE_DESC, Unit.ACRE_ID, Unit.ACRE_SYN, Unit.ACRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOMETRE2_STR, Unit.KILOMETRE2_DESC, Unit.KILOMETRE2_ID, Unit.KILOMETRE2_SYN, Unit.KILOMETRE2_SINCE, Unit.TYPE_ID);
+				/* Units of volume */
+				addKeyWord(Unit.MILLIMETRE3_STR, Unit.MILLIMETRE3_DESC, Unit.MILLIMETRE3_ID, Unit.MILLIMETRE3_SYN, Unit.MILLIMETRE3_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.CENTIMETRE3_STR, Unit.CENTIMETRE3_DESC, Unit.CENTIMETRE3_ID, Unit.CENTIMETRE3_SYN, Unit.CENTIMETRE3_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.METRE3_STR, Unit.METRE3_DESC, Unit.METRE3_ID, Unit.METRE3_SYN, Unit.METRE3_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOMETRE3_STR, Unit.KILOMETRE3_DESC, Unit.KILOMETRE3_ID, Unit.KILOMETRE3_SYN, Unit.KILOMETRE3_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILLILITRE_STR, Unit.MILLILITRE_DESC, Unit.MILLILITRE_ID, Unit.MILLILITRE_SYN, Unit.MILLILITRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.LITRE_STR, Unit.LITRE_DESC, Unit.LITRE_ID, Unit.LITRE_SYN, Unit.LITRE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GALLON_STR, Unit.GALLON_DESC, Unit.GALLON_ID, Unit.GALLON_SYN, Unit.GALLON_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PINT_STR, Unit.PINT_DESC, Unit.PINT_ID, Unit.PINT_SYN, Unit.PINT_SINCE, Unit.TYPE_ID);
+				/* Units of time */
+				addKeyWord(Unit.SECOND_STR, Unit.SECOND_DESC, Unit.SECOND_ID, Unit.SECOND_SYN, Unit.SECOND_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILLISECOND_STR, Unit.MILLISECOND_DESC, Unit.MILLISECOND_ID, Unit.MILLISECOND_SYN, Unit.MILLISECOND_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MINUTE_STR, Unit.MINUTE_DESC, Unit.MINUTE_ID, Unit.MINUTE_SYN, Unit.MINUTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.HOUR_STR, Unit.HOUR_DESC, Unit.HOUR_ID, Unit.HOUR_SYN, Unit.HOUR_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.DAY_STR, Unit.DAY_DESC, Unit.DAY_ID, Unit.DAY_SYN, Unit.DAY_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.WEEK_STR, Unit.WEEK_DESC, Unit.WEEK_ID, Unit.WEEK_SYN, Unit.WEEK_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.JULIAN_YEAR_STR, Unit.JULIAN_YEAR_DESC, Unit.JULIAN_YEAR_ID, Unit.JULIAN_YEAR_SYN, Unit.JULIAN_YEAR_SINCE, Unit.TYPE_ID);
+				/* Units of mass */
+				addKeyWord(Unit.KILOGRAM_STR, Unit.KILOGRAM_DESC, Unit.KILOGRAM_ID, Unit.KILOGRAM_SYN, Unit.KILOGRAM_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GRAM_STR, Unit.GRAM_DESC, Unit.GRAM_ID, Unit.GRAM_SYN, Unit.GRAM_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILLIGRAM_STR, Unit.MILLIGRAM_DESC, Unit.MILLIGRAM_ID, Unit.MILLIGRAM_SYN, Unit.MILLIGRAM_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.DECAGRAM_STR, Unit.DECAGRAM_DESC, Unit.DECAGRAM_ID, Unit.DECAGRAM_SYN, Unit.DECAGRAM_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.TONNE_STR, Unit.TONNE_DESC, Unit.TONNE_ID, Unit.TONNE_SYN, Unit.TONNE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.OUNCE_STR, Unit.OUNCE_DESC, Unit.OUNCE_ID, Unit.OUNCE_SYN, Unit.OUNCE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.POUND_STR, Unit.POUND_DESC, Unit.POUND_ID, Unit.POUND_SYN, Unit.POUND_SINCE, Unit.TYPE_ID);
+				/* Units of information */
+				addKeyWord(Unit.BIT_STR, Unit.BIT_DESC, Unit.BIT_ID, Unit.BIT_SYN, Unit.BIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOBIT_STR, Unit.KILOBIT_DESC, Unit.KILOBIT_ID, Unit.KILOBIT_SYN, Unit.KILOBIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MEGABIT_STR, Unit.MEGABIT_DESC, Unit.MEGABIT_ID, Unit.MEGABIT_SYN, Unit.MEGABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GIGABIT_STR, Unit.GIGABIT_DESC, Unit.GIGABIT_ID, Unit.GIGABIT_SYN, Unit.GIGABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.TERABIT_STR, Unit.TERABIT_DESC, Unit.TERABIT_ID, Unit.TERABIT_SYN, Unit.TERABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PETABIT_STR, Unit.PETABIT_DESC, Unit.PETABIT_ID, Unit.PETABIT_SYN, Unit.PETABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.EXABIT_STR, Unit.EXABIT_DESC, Unit.EXABIT_ID, Unit.EXABIT_SYN, Unit.EXABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ZETTABIT_STR, Unit.ZETTABIT_DESC, Unit.ZETTABIT_ID, Unit.ZETTABIT_SYN, Unit.ZETTABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.YOTTABIT_STR, Unit.YOTTABIT_DESC, Unit.YOTTABIT_ID, Unit.YOTTABIT_SYN, Unit.YOTTABIT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.BYTE_STR, Unit.BYTE_DESC, Unit.BYTE_ID, Unit.BYTE_SYN, Unit.BYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOBYTE_STR, Unit.KILOBYTE_DESC, Unit.KILOBYTE_ID, Unit.KILOBYTE_SYN, Unit.KILOBYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MEGABYTE_STR, Unit.MEGABYTE_DESC, Unit.MEGABYTE_ID, Unit.MEGABYTE_SYN, Unit.MEGABYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GIGABYTE_STR, Unit.GIGABYTE_DESC, Unit.GIGABYTE_ID, Unit.GIGABYTE_SYN, Unit.GIGABYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.TERABYTE_STR, Unit.TERABYTE_DESC, Unit.TERABYTE_ID, Unit.TERABYTE_SYN, Unit.TERABYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.PETABYTE_STR, Unit.PETABYTE_DESC, Unit.PETABYTE_ID, Unit.PETABYTE_SYN, Unit.PETABYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.EXABYTE_STR, Unit.EXABYTE_DESC, Unit.EXABYTE_ID, Unit.EXABYTE_SYN, Unit.EXABYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ZETTABYTE_STR, Unit.ZETTABYTE_DESC, Unit.ZETTABYTE_ID, Unit.ZETTABYTE_SYN, Unit.ZETTABYTE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.YOTTABYTE_STR, Unit.YOTTABYTE_DESC, Unit.YOTTABYTE_ID, Unit.YOTTABYTE_SYN, Unit.YOTTABYTE_SINCE, Unit.TYPE_ID);
+				/* Units of energy */
+				addKeyWord(Unit.JOULE_STR, Unit.JOULE_DESC, Unit.JOULE_ID, Unit.JOULE_SYN, Unit.JOULE_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.ELECTRONO_VOLT_STR, Unit.ELECTRONO_VOLT_DESC, Unit.ELECTRONO_VOLT_ID, Unit.ELECTRONO_VOLT_SYN, Unit.ELECTRONO_VOLT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILO_ELECTRONO_VOLT_STR, Unit.KILO_ELECTRONO_VOLT_DESC, Unit.KILO_ELECTRONO_VOLT_ID, Unit.KILO_ELECTRONO_VOLT_SYN, Unit.KILO_ELECTRONO_VOLT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MEGA_ELECTRONO_VOLT_STR, Unit.MEGA_ELECTRONO_VOLT_DESC, Unit.MEGA_ELECTRONO_VOLT_ID, Unit.MEGA_ELECTRONO_VOLT_SYN, Unit.MEGA_ELECTRONO_VOLT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.GIGA_ELECTRONO_VOLT_STR, Unit.GIGA_ELECTRONO_VOLT_DESC, Unit.GIGA_ELECTRONO_VOLT_ID, Unit.GIGA_ELECTRONO_VOLT_SYN, Unit.GIGA_ELECTRONO_VOLT_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.TERA_ELECTRONO_VOLT_STR, Unit.TERA_ELECTRONO_VOLT_DESC, Unit.TERA_ELECTRONO_VOLT_ID, Unit.TERA_ELECTRONO_VOLT_SYN, Unit.TERA_ELECTRONO_VOLT_SINCE, Unit.TYPE_ID);
+				/* Units of speed */
+				addKeyWord(Unit.METRE_PER_SECOND_STR, Unit.METRE_PER_SECOND_DESC, Unit.METRE_PER_SECOND_ID, Unit.METRE_PER_SECOND_SYN, Unit.METRE_PER_SECOND_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOMETRE_PER_HOUR_STR, Unit.KILOMETRE_PER_HOUR_DESC, Unit.KILOMETRE_PER_HOUR_ID, Unit.KILOMETRE_PER_HOUR_SYN, Unit.KILOMETRE_PER_HOUR_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILE_PER_HOUR_STR, Unit.MILE_PER_HOUR_DESC, Unit.MILE_PER_HOUR_ID, Unit.MILE_PER_HOUR_SYN, Unit.MILE_PER_HOUR_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KNOT_STR, Unit.KNOT_DESC, Unit.KNOT_ID, Unit.KNOT_SYN, Unit.KNOT_SINCE, Unit.TYPE_ID);
+				/* Units of acceleration */
+				addKeyWord(Unit.METRE_PER_SECOND2_STR, Unit.METRE_PER_SECOND2_DESC, Unit.METRE_PER_SECOND2_ID, Unit.METRE_PER_SECOND2_SYN, Unit.METRE_PER_SECOND2_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.KILOMETRE_PER_HOUR2_STR, Unit.KILOMETRE_PER_HOUR2_DESC, Unit.KILOMETRE_PER_HOUR2_ID, Unit.KILOMETRE_PER_HOUR2_SYN, Unit.KILOMETRE_PER_HOUR2_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MILE_PER_HOUR2_STR, Unit.MILE_PER_HOUR2_DESC, Unit.MILE_PER_HOUR2_ID, Unit.MILE_PER_HOUR2_SYN, Unit.MILE_PER_HOUR2_SINCE, Unit.TYPE_ID);
+				/* Units of angle */
+				addKeyWord(Unit.RADIAN_ARC_STR, Unit.RADIAN_ARC_DESC, Unit.RADIAN_ARC_ID, Unit.RADIAN_ARC_SYN, Unit.RADIAN_ARC_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.DEGREE_ARC_STR, Unit.DEGREE_ARC_DESC, Unit.DEGREE_ARC_ID, Unit.DEGREE_ARC_SYN, Unit.DEGREE_ARC_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.MINUTE_ARC_STR, Unit.MINUTE_ARC_DESC, Unit.MINUTE_ARC_ID, Unit.MINUTE_ARC_SYN, Unit.MINUTE_ARC_SINCE, Unit.TYPE_ID);
+				addKeyWord(Unit.SECOND_ARC_STR, Unit.SECOND_ARC_DESC, Unit.SECOND_ARC_ID, Unit.SECOND_ARC_SYN, Unit.SECOND_ARC_SINCE, Unit.TYPE_ID);
 			}
 			/*
 			 * Other parser symbols key words
 			 */
-			addKeyWord(ParserSymbol.LEFT_PARENTHESES_STR, ParserSymbol.LEFT_PARENTHESES_DESC, ParserSymbol.LEFT_PARENTHESES_ID, ParserSymbol.TYPE_ID);
-			addKeyWord(ParserSymbol.RIGHT_PARENTHESES_STR, ParserSymbol.RIGHT_PARENTHESES_DESC, ParserSymbol.RIGHT_PARENTHESES_ID, ParserSymbol.TYPE_ID);
-			addKeyWord(ParserSymbol.COMMA_STR, ParserSymbol.COMMA_DESC, ParserSymbol.COMMA_ID, ParserSymbol.TYPE_ID);
-			addKeyWord(ParserSymbol.SEMI_STR, ParserSymbol.SEMI_DESC, ParserSymbol.COMMA_ID, ParserSymbol.TYPE_ID);
-			addKeyWord(ParserSymbol.NUMBER_REG_EXP, ParserSymbol.NUMBER_REG_DESC, ParserSymbol.NUMBER_ID, ParserSymbol.NUMBER_TYPE_ID);
+			addKeyWord(ParserSymbol.LEFT_PARENTHESES_STR, ParserSymbol.LEFT_PARENTHESES_DESC, ParserSymbol.LEFT_PARENTHESES_ID, ParserSymbol.LEFT_PARENTHESES_SYN, ParserSymbol.LEFT_PARENTHESES_SINCE, ParserSymbol.TYPE_ID);
+			addKeyWord(ParserSymbol.RIGHT_PARENTHESES_STR, ParserSymbol.RIGHT_PARENTHESES_DESC, ParserSymbol.RIGHT_PARENTHESES_ID, ParserSymbol.RIGHT_PARENTHESES_SYN, ParserSymbol.RIGHT_PARENTHESES_SINCE, ParserSymbol.TYPE_ID);
+			addKeyWord(ParserSymbol.COMMA_STR, ParserSymbol.COMMA_DESC, ParserSymbol.COMMA_ID, ParserSymbol.COMMA_SYN, ParserSymbol.COMMA_SINCE, ParserSymbol.TYPE_ID);
+			addKeyWord(ParserSymbol.SEMI_STR, ParserSymbol.SEMI_DESC, ParserSymbol.COMMA_ID, ParserSymbol.SEMI_SYN, ParserSymbol.COMMA_SINCE, ParserSymbol.TYPE_ID);
+			addKeyWord(ParserSymbol.DECIMAL_REG_EXP, ParserSymbol.NUMBER_REG_DESC, ParserSymbol.NUMBER_ID, ParserSymbol.NUMBER_SYN, ParserSymbol.NUMBER_SINCE, ParserSymbol.NUMBER_TYPE_ID);
 		}
 		/**
 		 * Adds arguments key words to the keywords list
@@ -4844,9 +6175,9 @@ namespace org.mariuszgromada.math.mxparser {
 			for (int argumentIndex = 0; argumentIndex<argumentsNumber; argumentIndex++) {
 				Argument arg = argumentsList[argumentIndex];
 				if (arg.getArgumentType() != Argument.RECURSIVE_ARGUMENT)
-					addKeyWord(arg.getArgumentName(),arg.getDescription(), argumentIndex,Argument.TYPE_ID);
+					addKeyWord(arg.getArgumentName(), arg.getDescription(), argumentIndex, arg.getArgumentName(), "", Argument.TYPE_ID);
 				else
-					addKeyWord(arg.getArgumentName(),arg.getDescription(), argumentIndex,RecursiveArgument.TYPE_ID_RECURSIVE);
+					addKeyWord(arg.getArgumentName(), arg.getDescription(), argumentIndex, arg.getArgumentName() + "(n)", "", RecursiveArgument.TYPE_ID_RECURSIVE);
 			}
 		}
 		/**
@@ -4856,7 +6187,15 @@ namespace org.mariuszgromada.math.mxparser {
 			int functionsNumber = functionsList.Count;
 			for (int functionIndex = 0; functionIndex<functionsNumber; functionIndex++) {
 				Function fun = functionsList[functionIndex];
-				addKeyWord(fun.getFunctionName(),fun.getDescription(), functionIndex,Function.TYPE_ID);
+				String syntax = fun.getFunctionName() + "(";
+				int paramsNum = fun.getParametersNumber();
+				for (int i = 0; i < paramsNum; i++) {
+					syntax = syntax + fun.getParameterName(i);
+					if ((paramsNum > 1) && (i < paramsNum - 1))
+						syntax = syntax + ",";
+				}
+				syntax = syntax + ")";
+				addKeyWord(fun.getFunctionName(), fun.getDescription(), functionIndex, syntax, "", Function.TYPE_ID);
 			}
 		}
 		/**
@@ -4866,15 +6205,157 @@ namespace org.mariuszgromada.math.mxparser {
 			int constantsNumber = constantsList.Count;
 			for (int constantIndex = 0; constantIndex < constantsNumber; constantIndex++) {
 				Constant c = constantsList[constantIndex];
-				addKeyWord(c.getConstantName(), c.getDescription(), constantIndex, Constant.TYPE_ID);
+				addKeyWord(c.getConstantName(), c.getDescription(), constantIndex, c.getConstantName(), "", Constant.TYPE_ID);
 			}
 		}
-		private void addKeyWord(String wordString, String wordDescription, int wordId, int wordTypeId) {
-			keyWordsList.Add(new KeyWord(wordString, wordDescription, wordId, wordTypeId));
+		/**
+		 * Final validation of key words
+		 */
+		private void validateParserKeyWords() {
+			if (mXparser.overrideBuiltinTokens) {
+				/*
+				 * Building list of user defined tokens
+				 */
+				List<String> userDefinedTokens = new List<String>();
+				foreach (Argument arg in argumentsList)
+					userDefinedTokens.Add(arg.getArgumentName());
+				foreach (Function fun in functionsList)
+					userDefinedTokens.Add(fun.getFunctionName());
+				foreach (Constant cons in constantsList)
+					userDefinedTokens.Add(cons.getConstantName());
+				/*
+				 * If no user defined tokens then exit
+				 */
+				if (userDefinedTokens.Count == 0) return;
+				/*
+				 * Building list of built-in tokens to remove
+				 */
+				List<KeyWord> keyWordsToOverride = new List<KeyWord>();
+				foreach (KeyWord kw in keyWordsList)
+					if (userDefinedTokens.Contains(kw.wordString))
+						keyWordsToOverride.Add(kw);
+				/*
+				 * If nothing to remove then exit
+				 */
+				if (keyWordsToOverride.Count == 0) return;
+				/*
+				 * Performing final override
+				 */
+				foreach (KeyWord kw in keyWordsToOverride)
+					keyWordsList.Remove(kw);
+			}
+		}
+		/**
+		 * Adds key word to the keyWords list
+		 *
+		 * @param wordString
+		 * @param wordDescription
+		 * @param wordId
+		 * @param wordTypeId
+		 */
+		private void addKeyWord(String wordString, String wordDescription, int wordId, String wordSyntax, String wordSince, int wordTypeId) {
+			if ((mXparser.tokensToRemove.Count > 0) || (mXparser.tokensToModify.Count > 0))
+				if ((wordTypeId == Function1Arg.TYPE_ID) ||
+						(wordTypeId == Function2Arg.TYPE_ID) ||
+						(wordTypeId == Function3Arg.TYPE_ID) ||
+						(wordTypeId == FunctionVariadic.TYPE_ID) ||
+						(wordTypeId == CalculusOperator.TYPE_ID) ||
+						(wordTypeId == ConstantValue.TYPE_ID) ||
+						(wordTypeId == RandomVariable.TYPE_ID) ||
+						(wordTypeId == Unit.TYPE_ID)) {
+					if (mXparser.tokensToRemove.Count > 0)
+						if (mXparser.tokensToRemove.Contains(wordString)) return;
+					if (mXparser.tokensToModify.Count > 0) {
+						foreach (TokenModification tm in mXparser.tokensToModify)
+							if (tm.currentToken.Equals(wordString)) {
+								wordString = tm.newToken;
+								if (tm.newTokenDescription != null)
+									wordDescription = tm.newTokenDescription;
+                                wordSyntax = wordSyntax.Replace(tm.currentToken, tm.newToken);
+                            }
+                    }
+				}
+			keyWordsList.Add(new KeyWord(wordString, wordDescription, wordId, wordSyntax, wordSince, wordTypeId));
+		}
+		/**
+		 * Checks whether unknown token represents number literal
+		 * provided in different numeral base system, where
+		 * base is between 1 and 36.
+		 *
+		 * @param token   The not know to the parser
+		 */
+		private void checkOtherNumberBases(Token token) {
+			int dotPos = 0;
+			int tokenStrLength = token.tokenStr.Length;
+			/* find dot position */
+			if (tokenStrLength >= 2) {
+				if (token.tokenStr[1] == '.')
+					dotPos = 1;
+			}
+			if ((dotPos == 0) && (tokenStrLength >= 3)) {
+				if (token.tokenStr[2] == '.')
+					dotPos = 2;
+			}
+			if ((dotPos == 0) && (tokenStrLength >= 4)) {
+				if (token.tokenStr[3] == '.')
+					dotPos = 3;
+			}
+			if (dotPos == 0) return;
+			/* check if there is base indicator */
+			String baseInd = token.tokenStr.Substring(0, dotPos).ToLower();
+			String numberLiteral = "";
+			if (tokenStrLength > dotPos + 1) numberLiteral = token.tokenStr.Substring(dotPos + 1);
+			int numeralSystemBase = 0;
+			/* evaluate numeral system base */
+			if (baseInd.Equals("b")) numeralSystemBase = 2;
+			else if (baseInd.Equals("o")) numeralSystemBase = 8;
+			else if (baseInd.Equals("h")) numeralSystemBase = 16;
+			else if (baseInd.Equals("b1")) numeralSystemBase = 1;
+			else if (baseInd.Equals("b2")) numeralSystemBase = 2;
+			else if (baseInd.Equals("b3")) numeralSystemBase = 3;
+			else if (baseInd.Equals("b4")) numeralSystemBase = 4;
+			else if (baseInd.Equals("b5")) numeralSystemBase = 5;
+			else if (baseInd.Equals("b6")) numeralSystemBase = 6;
+			else if (baseInd.Equals("b7")) numeralSystemBase = 7;
+			else if (baseInd.Equals("b8")) numeralSystemBase = 8;
+			else if (baseInd.Equals("b9")) numeralSystemBase = 9;
+			else if (baseInd.Equals("b10")) numeralSystemBase = 10;
+			else if (baseInd.Equals("b11")) numeralSystemBase = 11;
+			else if (baseInd.Equals("b12")) numeralSystemBase = 12;
+			else if (baseInd.Equals("b13")) numeralSystemBase = 13;
+			else if (baseInd.Equals("b14")) numeralSystemBase = 14;
+			else if (baseInd.Equals("b15")) numeralSystemBase = 15;
+			else if (baseInd.Equals("b16")) numeralSystemBase = 16;
+			else if (baseInd.Equals("b17")) numeralSystemBase = 17;
+			else if (baseInd.Equals("b18")) numeralSystemBase = 18;
+			else if (baseInd.Equals("b19")) numeralSystemBase = 19;
+			else if (baseInd.Equals("b20")) numeralSystemBase = 20;
+			else if (baseInd.Equals("b21")) numeralSystemBase = 21;
+			else if (baseInd.Equals("b22")) numeralSystemBase = 22;
+			else if (baseInd.Equals("b23")) numeralSystemBase = 23;
+			else if (baseInd.Equals("b24")) numeralSystemBase = 24;
+			else if (baseInd.Equals("b25")) numeralSystemBase = 25;
+			else if (baseInd.Equals("b26")) numeralSystemBase = 26;
+			else if (baseInd.Equals("b27")) numeralSystemBase = 27;
+			else if (baseInd.Equals("b28")) numeralSystemBase = 28;
+			else if (baseInd.Equals("b29")) numeralSystemBase = 29;
+			else if (baseInd.Equals("b30")) numeralSystemBase = 30;
+			else if (baseInd.Equals("b31")) numeralSystemBase = 31;
+			else if (baseInd.Equals("b32")) numeralSystemBase = 32;
+			else if (baseInd.Equals("b33")) numeralSystemBase = 33;
+			else if (baseInd.Equals("b34")) numeralSystemBase = 34;
+			else if (baseInd.Equals("b35")) numeralSystemBase = 35;
+			else if (baseInd.Equals("b36")) numeralSystemBase = 36;
+			/* if base was found, perform conversion */
+			if ((numeralSystemBase > 0) && (numeralSystemBase <= 36)) {
+				token.tokenTypeId = ParserSymbol.NUMBER_TYPE_ID;
+				token.tokenId = ParserSymbol.NUMBER_ID;
+				token.tokenValue = NumberTheory.convOthBase2Decimal(numberLiteral, numeralSystemBase);
+			}
 		}
 		/**
 		 * Adds expression token
-		 * Method is caleld by the tokenExpressionString()
+		 * Method is called by the tokenExpressionString()
 		 * while parsing string expression
 		 *
 		 * @param      tokenStr            the token string
@@ -4889,11 +6370,12 @@ namespace org.mariuszgromada.math.mxparser {
 			token.tokenTypeId = keyWord.wordTypeId;
 			if (token.tokenTypeId == Argument.TYPE_ID)
 				token.tokenValue = argumentsList[token.tokenId].argumentValue;
-			else
-				if (token.tokenTypeId == ParserSymbol.NUMBER_TYPE_ID) {
+			else if (token.tokenTypeId == ParserSymbol.NUMBER_TYPE_ID) {
 					token.tokenValue = Double.Parse(token.tokenStr, NumberStyles.Float, CultureInfo.InvariantCulture);
 					token.keyWord = ParserSymbol.NUMBER_STR;
-				}
+			} else if (token.tokenTypeId == Token.NOT_MATCHED) {
+				checkOtherNumberBases(token);
+			}
 		}
 		/**
 		 * Tokenizing expressiong string
@@ -4904,6 +6386,7 @@ namespace org.mariuszgromada.math.mxparser {
 			 */
 			keyWordsList = new List<KeyWord>();
 			addParserKeyWords();
+			validateParserKeyWords();
 			if (parserKeyWordsOnly == false) {
 				addArgumentsKeyWords();
 				addFunctionsKeyWords();
@@ -4911,7 +6394,7 @@ namespace org.mariuszgromada.math.mxparser {
 			}
 			keyWordsList.Sort(new DescKwLenComparator());
 			/*
-			 * Evaluate position after soritng for the following kwywords types
+			 * Evaluate position after sorting for the following keywords types
 			 *    number
 			 *    plus operator
 			 *    minus operator
@@ -4957,6 +6440,13 @@ namespace org.mariuszgromada.math.mxparser {
 			String tokenStr = "";
 			int matchStatusPrev = NOT_FOUND; /* unknown key word (previous) */
 			int matchStatus = NOT_FOUND; /* unknown key word (current) */
+			KeyWord kw = null;
+			String sub = "";
+			String kwStr = "";
+			char precedingChar;
+			char followingChar;
+			char firstChar;
+			double tmpParsed = 0;
 			/*
 			 * Check all available positions in the expression tokens list
 			 */
@@ -4969,23 +6459,51 @@ namespace org.mariuszgromada.math.mxparser {
 				 * with the given regExp
 				 */
 				int numEnd = -1;
-				for (int i=pos; i<newExpressionString.Length; i++) {
-					String str = newExpressionString.Substring(pos, i+1-pos);
-					/*
-					if (    mXparser.RegexMatch(str, ParserSymbol.NUMBER).Success )
-					{
-						numEnd = i;
-						mXparser.consolePrintln("Regex -> |" + str + "=number" + " " + pos + ", " + i);
-					}*/
-					try
-					{
-						Double.Parse(str, NumberStyles.Float, CultureInfo.InvariantCulture);
-						numEnd = i;
-					}
-					catch (Exception e)
-					{
-						errorMessage = e.Message;
-						syntaxStatus = SYNTAX_ERROR_OR_STATUS_UNKNOWN;
+				/*
+				 * Number has to start with digit
+				 */
+				firstChar = newExpressionString[pos];
+				if (	(firstChar == '+') ||
+						(firstChar == '-') ||
+						(firstChar == '0') ||
+						(firstChar == '1') ||
+						(firstChar == '2') ||
+						(firstChar == '3') ||
+						(firstChar == '4') ||
+						(firstChar == '5') ||
+						(firstChar == '6') ||
+						(firstChar == '7') ||
+						(firstChar == '8') ||
+						(firstChar == '9')	) {
+					for (int i = pos; i < newExpressionString.Length; i++) {
+						/*
+						 * Escaping if encountering char that can not
+						 * be included in number
+						 */
+						if (i > pos) {
+							c = newExpressionString[i];
+							if (	(c != '+') &&
+									(c != '-') &&
+									(c != '0') &&
+									(c != '1') &&
+									(c != '2') &&
+									(c != '3') &&
+									(c != '4') &&
+									(c != '5') &&
+									(c != '6') &&
+									(c != '7') &&
+									(c != '8') &&
+									(c != '9') &&
+									(c != '.') &&
+									(c != 'e') &&
+									(c != 'E')	) break;
+						}
+						/*
+						 * Checking if substring represents number
+						 */
+						String str = newExpressionString.Substring(pos, i + 1 - pos);
+						if (Double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out tmpParsed))
+							numEnd = i;
 					}
 				}
 				/*
@@ -4993,26 +6511,54 @@ namespace org.mariuszgromada.math.mxparser {
 				 */
 				if (numEnd >= 0)
 					if (pos > 0) {
-						c = newExpressionString[pos-1];
+						precedingChar = newExpressionString[pos-1];
 						if (
-								( c != ',' ) &&
-								( c != ';' ) &&
-								( c != '|' ) &&
-								( c != '&' ) &&
-								( c != '+' ) &&
-								( c != '-' ) &&
-								( c != '*' ) &&
-								( c != '\\' ) &&
-								( c != '/' ) &&
-								( c != '%' ) &&
-								( c != '(' ) &&
-								( c != ')' ) &&
-								( c != '=' ) &&
-								( c != '>' ) &&
-								( c != '<' ) &&
-								( c != '~' ) &&
-								( c != '^' ) &&
-								( c != '!' )	)
+								( precedingChar != ',' ) &&
+								( precedingChar != ';' ) &&
+								( precedingChar != '|' ) &&
+								( precedingChar != '&' ) &&
+								( precedingChar != '+' ) &&
+								( precedingChar != '-' ) &&
+								( precedingChar != '*' ) &&
+								( precedingChar != '\\' ) &&
+								( precedingChar != '/' ) &&
+								( precedingChar != '(' ) &&
+								( precedingChar != ')' ) &&
+								( precedingChar != '=' ) &&
+								( precedingChar != '>' ) &&
+								( precedingChar != '<' ) &&
+								( precedingChar != '~' ) &&
+								( precedingChar != '^' ) &&
+								( precedingChar != '#' ) &&
+								( precedingChar != '%' ) &&
+								( precedingChar != '@' ) &&
+								( precedingChar != '!' )	)
+							numEnd = -1;
+					}
+				if (numEnd >= 0)
+					if (numEnd < newExpressionString.Length - 1) {
+						followingChar = newExpressionString[numEnd + 1];
+						if (
+								(followingChar != ',') &&
+								(followingChar != ';') &&
+								(followingChar != '|') &&
+								(followingChar != '&') &&
+								(followingChar != '+') &&
+								(followingChar != '-') &&
+								(followingChar != '*') &&
+								(followingChar != '\\') &&
+								(followingChar != '/') &&
+								(followingChar != '(') &&
+								(followingChar != ')') &&
+								(followingChar != '=') &&
+								(followingChar != '>') &&
+								(followingChar != '<') &&
+								(followingChar != '~') &&
+								(followingChar != '^') &&
+								(followingChar != '#') &&
+								(followingChar != '%') &&
+								(followingChar != '@') &&
+								(followingChar != '!'))
 							numEnd = -1;
 					}
 				if (numEnd >= 0) {
@@ -5040,13 +6586,16 @@ namespace org.mariuszgromada.math.mxparser {
 					 *    '2-1' :  1(num) -(op) 2(num) = 1(num)
 					 *    -1+2  : -1(num) +(op) 2(num) = 1(num)
 					 */
-					char fc = newExpressionString[pos];
+					firstChar = newExpressionString[pos];
 					bool leadingOp = true;
-					if ( (fc == '-') || (fc == '+') ) {
+					if ( (firstChar == '-') || (firstChar == '+') ) {
 						if (initialTokens.Count > 0) {
 							Token lastToken = initialTokens[initialTokens.Count-1];
-							if (	(lastToken.tokenTypeId == Operator.TYPE_ID) ||
-									( (lastToken.tokenTypeId == ParserSymbol.TYPE_ID) && (lastToken.tokenId == ParserSymbol.LEFT_PARENTHESES_ID) ))
+							if (((lastToken.tokenTypeId == Operator.TYPE_ID) && (lastToken.tokenId != Operator.FACT_ID) && (lastToken.tokenId != Operator.PERC_ID)) ||
+									(lastToken.tokenTypeId == BinaryRelation.TYPE_ID) ||
+									(lastToken.tokenTypeId == BooleanOperator.TYPE_ID) ||
+									(lastToken.tokenTypeId == BitwiseOperator.TYPE_ID) ||
+									((lastToken.tokenTypeId == ParserSymbol.TYPE_ID) && (lastToken.tokenId == ParserSymbol.LEFT_PARENTHESES_ID)))
 								leadingOp = false;
 							 else leadingOp = true;
 						} else leadingOp = false;
@@ -5058,9 +6607,9 @@ namespace org.mariuszgromada.math.mxparser {
 						/*
 						 * Add leading operator to the tokens list
 						 */
-						if ( fc == '-')
+						if (firstChar == '-')
 							addToken("-", keyWordsList[minusKwId] );
-						if ( fc == '+')
+						if (firstChar == '+')
 							addToken("+", keyWordsList[plusKwId] );
 						pos++;
 					}
@@ -5070,7 +6619,7 @@ namespace org.mariuszgromada.math.mxparser {
 					tokenStr = newExpressionString.Substring(pos, numEnd+1-pos);
 					addToken(tokenStr, keyWordsList[numberKwId] );
 					/*
-					 * change current position (just after the numeber ends)
+					 * change current position (just after the number ends)
 					 */
 					pos = numEnd+1;
 					lastPos = pos;
@@ -5080,17 +6629,12 @@ namespace org.mariuszgromada.math.mxparser {
 					matchStatus = FOUND;
 					matchStatusPrev = FOUND;
 				} else {
-				/*
-				 * If there is no number wich starts with current position
-				 */
 					/*
+					 * If there is no number which starts with current position
 					 * Check for known key words
 					 */
 					int kwId = -1;
 					matchStatus = NOT_FOUND;
-					KeyWord kw;
-					String sub = "";
-					String kwStr = "";
 					do {
 						kwId++;
 						kw = keyWordsList[kwId];
@@ -5099,45 +6643,85 @@ namespace org.mariuszgromada.math.mxparser {
 							sub = newExpressionString.Substring(pos, kwStr.Length );
 							if (sub.Equals(kwStr))
 								matchStatus = FOUND;
+							/*
+							 * If key word is known by the parser
+							 */
+							if (matchStatus == FOUND) {
+								/*
+								 * If key word is in the form of identifier
+								 * then check preceding and following characters
+								 */
+								if ((kw.wordTypeId == Argument.TYPE_ID) ||
+										(kw.wordTypeId == RecursiveArgument.TYPE_ID_RECURSIVE) ||
+										(kw.wordTypeId == Function1Arg.TYPE_ID) ||
+										(kw.wordTypeId == Function2Arg.TYPE_ID) ||
+										(kw.wordTypeId == Function3Arg.TYPE_ID) ||
+										(kw.wordTypeId == FunctionVariadic.TYPE_ID) ||
+										(kw.wordTypeId == ConstantValue.TYPE_ID) ||
+										(kw.wordTypeId == Constant.TYPE_ID) ||
+										(kw.wordTypeId == RandomVariable.TYPE_ID) ||
+										(kw.wordTypeId == Unit.TYPE_ID) ||
+										(kw.wordTypeId == Function.TYPE_ID) ||
+										(kw.wordTypeId == CalculusOperator.TYPE_ID)) {
+									/*
+									 * Checking preceding character
+									 */
+									if (pos > 0) {
+										precedingChar = newExpressionString[pos - 1];
+										if (	(precedingChar != ',') &&
+												(precedingChar != ';') &&
+												(precedingChar != '|') &&
+												(precedingChar != '&') &&
+												(precedingChar != '+') &&
+												(precedingChar != '-') &&
+												(precedingChar != '*') &&
+												(precedingChar != '\\') &&
+												(precedingChar != '/') &&
+												(precedingChar != '(') &&
+												(precedingChar != ')') &&
+												(precedingChar != '=') &&
+												(precedingChar != '>') &&
+												(precedingChar != '<') &&
+												(precedingChar != '~') &&
+												(precedingChar != '^') &&
+												(precedingChar != '#') &&
+												(precedingChar != '%') &&
+												(precedingChar != '@') &&
+												(precedingChar != '!')) matchStatus = NOT_FOUND;
+									}
+									/*
+									 * Checking following character
+									 */
+									if ((matchStatus == FOUND) && (pos + kwStr.Length < newExpressionString.Length)) {
+										followingChar = newExpressionString[pos + kwStr.Length];
+										if (	(followingChar != ',') &&
+												(followingChar != ';') &&
+												(followingChar != '|') &&
+												(followingChar != '&') &&
+												(followingChar != '+') &&
+												(followingChar != '-') &&
+												(followingChar != '*') &&
+												(followingChar != '\\') &&
+												(followingChar != '/') &&
+												(followingChar != '(') &&
+												(followingChar != ')') &&
+												(followingChar != '=') &&
+												(followingChar != '>') &&
+												(followingChar != '<') &&
+												(followingChar != '~') &&
+												(followingChar != '^') &&
+												(followingChar != '#') &&
+												(followingChar != '%') &&
+												(followingChar != '@') &&
+												(followingChar != '!')) matchStatus = NOT_FOUND;
+									}
+								}
+							}
 						}
 					} while ( (kwId < keyWordsList.Count-1) && (matchStatus == NOT_FOUND) );
 					/*
-					 * If key word is known by the parser
+					 * If key word known by the parser was found
 					 */
-					if (matchStatus == FOUND)
-						if (
-								(kw.wordTypeId == Argument.TYPE_ID) ||
-								(kw.wordTypeId == RecursiveArgument.TYPE_ID_RECURSIVE) ||
-								(kw.wordTypeId == Function1Arg.TYPE_ID) ||
-								(kw.wordTypeId == Function2Arg.TYPE_ID) ||
-								(kw.wordTypeId == Function3Arg.TYPE_ID) ||
-								(kw.wordTypeId == ConstantValue.TYPE_ID) ||
-								(kw.wordTypeId == Constant.TYPE_ID) ||
-								(kw.wordTypeId == Function.TYPE_ID) ||
-								(kw.wordTypeId == CalculusOperator.TYPE_ID)	)
-							if ( pos + kwStr.Length < newExpressionString.Length ) {
-								c = newExpressionString[pos + kwStr.Length];
-								if (
-										( c != ',' ) &&
-										( c != ';' ) &&
-										( c != '|' ) &&
-										( c != '&' ) &&
-										( c != '+' ) &&
-										( c != '-' ) &&
-										( c != '*' ) &&
-										( c != '\\' ) &&
-										( c != '/' ) &&
-										( c != '%' ) &&
-										( c != '(' ) &&
-										( c != ')' ) &&
-										( c != '=' ) &&
-										( c != '>' ) &&
-										( c != '<' ) &&
-										( c != '~' ) &&
-										( c != '^' ) &&
-										( c != '!' )	)
-									matchStatus = NOT_FOUND;
-							}
 					if (matchStatus == FOUND) {
 						/*
 						 * if preceding word was not known by the parser
@@ -5234,9 +6818,11 @@ namespace org.mariuszgromada.math.mxparser {
 					token.tokenLevel = tokenLevel;
 					if ((token.tokenTypeId == ParserSymbol.TYPE_ID) && (token.tokenId == ParserSymbol.RIGHT_PARENTHESES_ID)) {
 						tokenLevel--;
-						TokenStackElement stackEl = tokenStack.Pop();
-						if (stackEl.precedingFunction == true)
-							tokenLevel--;
+						if (tokenStack.Count > 0) {
+							TokenStackElement stackEl = tokenStack.Pop();
+							if (stackEl.precedingFunction == true)
+								tokenLevel--;
+						}
 					}
 				}
 		}
@@ -5249,6 +6835,9 @@ namespace org.mariuszgromada.math.mxparser {
 				tokensList.Add(token.clone());
 			}
 		}
+		private const String FUNCTION = "function";
+		private const String ARGUMENT = "argument";
+		private const String ERROR = "error";
 		/**
 		 * Tokenizes expression string and returns tokens list,
 		 * including: string, type, level.
@@ -5261,9 +6850,66 @@ namespace org.mariuszgromada.math.mxparser {
 		public List<Token> getCopyOfInitialTokens() {
 			tokenizeExpressionString();
 			List<Token> tokensListCopy = new List<Token>();
-			foreach (Token token in initialTokens)
+			Token token;
+			for (int i = 0; i < initialTokens.Count; i++) {
+				token = initialTokens[i];
+				if (token.tokenTypeId == Token.NOT_MATCHED) {
+					if (mXparser.regexMatch(token.tokenStr, ParserSymbol.nameOnlyTokenRegExp)) {
+						token.looksLike = ARGUMENT;
+						if (i < initialTokens.Count - 1) {
+							Token tokenNext = initialTokens[i + 1];
+							if ((tokenNext.tokenTypeId == ParserSymbol.TYPE_ID) && (tokenNext.tokenId == ParserSymbol.LEFT_PARENTHESES_ID))
+								token.looksLike = FUNCTION;
+						}
+					} else {
+						token.looksLike = ERROR;
+					}
+				}
 				tokensListCopy.Add(token.clone());
+			}
 			return tokensListCopy;
+		}
+		/**
+		 * Returns missing user defined arguments names, i.e.
+		 * sin(x) + cos(y) where x and y are not defined
+		 * function will return x and y.
+		 *
+		 * @return Array of missing user defined arguments names
+		 * - distinct strings.
+		 */
+		public String[] getMissingUserDefinedArguments() {
+			List<Token> tokens = getCopyOfInitialTokens();
+			List<String> missingArguments = new List<String>();
+			foreach (Token t in tokens)
+				if ( t.looksLike.Equals(ARGUMENT) )
+					if ( !missingArguments.Contains(t.tokenStr) )
+						missingArguments.Add(t.tokenStr);
+			int n = missingArguments.Count;
+			String[] missArgs = new String[n];
+			for (int i = 0; i < n; i++)
+				missArgs[i] = missingArguments[i];
+			return missArgs;
+		}
+		/**
+		 * Returns missing user defined functions names, i.e.
+		 * sin(x) + fun(x,y) where fun is not defined
+		 * function will return fun.
+		 *
+		 * @return Array of missing user defined functions names
+		 * - distinct strings.
+		 */
+		public String[] getMissingUserDefinedFunctions() {
+			List<Token> tokens = getCopyOfInitialTokens();
+			List<String> missingFunctions = new List<String>();
+			foreach (Token t in tokens)
+				if ( t.looksLike.Equals(FUNCTION) )
+					if ( !missingFunctions.Contains(t.tokenStr) )
+						missingFunctions.Add(t.tokenStr);
+			int n = missingFunctions.Count;
+			String[] missFun = new String[n];
+			for (int i = 0; i < n; i++)
+				missFun[i] = missingFunctions[i];
+			return missFun;
 		}
 		/**
 		 * Gets initial tokens and returns copied list
@@ -5345,11 +6991,19 @@ namespace org.mariuszgromada.math.mxparser {
 			keyWordsList = new List<KeyWord>();
 			String helpStr = "Help content: \n\n";
 			addParserKeyWords();
+			validateParserKeyWords();
 			if (parserKeyWordsOnly == false) {
 				addArgumentsKeyWords();
 				addFunctionsKeyWords();
 				addConstantsKeyWords();
 			}
+			helpStr = helpStr + getLeftSpaces("12345", "#") + "  " +
+			getRightSpaces("01234567890123456789", "key word") + getRightSpaces("                        ", "type")
+			+ getRightSpaces("0123456789012345678901234567890123456789012345", "syntax") + getRightSpaces("012345", "since") + "description" + "\n";
+			helpStr = helpStr + getLeftSpaces("12345", "-") + "  " +
+			getRightSpaces("01234567890123456789", "--------") + getRightSpaces("                        ", "----")
+			+ getRightSpaces("0123456789012345678901234567890123456789012345", "------") + getRightSpaces("012345", "-----") + "-----------" + "\n";
+
 			keyWordsList.Sort( new KwTypeComparator() );
 			int keyWordsNumber = keyWordsList.Count;
 			String type, kw;
@@ -5372,17 +7026,71 @@ namespace org.mariuszgromada.math.mxparser {
 				case RandomVariable.TYPE_ID: type = RandomVariable.TYPE_DESC; break;
 				case ConstantValue.TYPE_ID: type = ConstantValue.TYPE_DESC; break;
 				case Argument.TYPE_ID: type = Argument.TYPE_DESC; break;
-				case RecursiveArgument.TYPE_ID_RECURSIVE: type = RecursiveArgument.TYPE_DESC; break;
+				case RecursiveArgument.TYPE_ID_RECURSIVE: type = RecursiveArgument.TYPE_DESC_RECURSIVE; break;
 				case Function.TYPE_ID: type = Function.TYPE_DESC; break;
 				case Constant.TYPE_ID: type = Constant.TYPE_DESC; break;
+				case Unit.TYPE_ID: type = Unit.TYPE_DESC; break;
+				case BitwiseOperator.TYPE_ID: type = BitwiseOperator.TYPE_DESC; break;
 				}
-				line = getLeftSpaces("12345",(keyWordIndex+1).ToString()) + ". " +
-				getRightSpaces("0123456789", kw) + getRightSpaces("                        ","<" + type + ">") + keyWord.description + "\n";
+				line = getLeftSpaces("12345", (keyWordIndex + 1).ToString()) + ". " +
+				getRightSpaces("01234567890123456789", kw) + getRightSpaces("                        ", "<" + type + ">")
+				+ getRightSpaces("0123456789012345678901234567890123456789012345", keyWord.syntax) + getRightSpaces("012345", keyWord.since) + keyWord.description + "\n";
 				if ( (line.ToLower().IndexOf(word.ToLower()) >= 0) ){
 					helpStr = helpStr + line;
 				}
 			}
 			return helpStr;
+		}
+		/**
+		 * Returns list of key words known to the parser
+		 *
+		 * @return      List of keywords known to the parser.
+		 *
+		 * @see KeyWord
+		 * @see KeyWord#wordTypeId
+		 * @see Expression#getHelp()
+		 */
+		public List<KeyWord> getKeyWords() {
+			return getKeyWords("");
+		}
+		/**
+		 * Returns list of key words known to the parser
+		 *
+		 * @param query Give any string to filter list of key words against this string.
+		 *              User more precise syntax: str=tokenString, desc=tokenDescription,
+		 *              syn=TokenSyntax, sin=tokenSince, wid=wordId, tid=wordTypeId
+		 *              to narrow the result.
+		 *
+		 * @return      List of keywords known to the parser filter against query string.
+		 *
+		 * @see KeyWord
+		 * @see KeyWord#wordTypeId
+		 * @see Expression#getHelp(String)
+		 */
+		public List<KeyWord> getKeyWords(String query) {
+			keyWordsList = new List<KeyWord>();
+			List<KeyWord> kwyWordsToReturn = new List<KeyWord>();
+			addParserKeyWords();
+			validateParserKeyWords();
+			if (parserKeyWordsOnly == false) {
+				addArgumentsKeyWords();
+				addFunctionsKeyWords();
+				addConstantsKeyWords();
+			}
+			keyWordsList.Sort(new KwTypeComparator());
+			String line;
+			foreach (KeyWord kw in keyWordsList) {
+				line = 	"str=" + kw.wordString + " " +
+						"desc=" + kw.description + " " +
+						"syn=" + kw.syntax + " " +
+						"sin=" + kw.since + " " +
+						"wid=" + kw.wordId + " " +
+						"tid=" + kw.wordTypeId
+						;
+				if ( (line.ToLower().IndexOf(query.ToLower()) >= 0) )
+					kwyWordsToReturn.Add(kw);
+			}
+			return kwyWordsToReturn;
 		}
 		/*
 		 * shows tokens
@@ -5395,12 +7103,16 @@ namespace org.mariuszgromada.math.mxparser {
 		 */
 		internal static void showTokens(List<Token> tokensList) {
 			String maxStr = "TokenTypeId";
-			int tokensNumber = tokensList.Count;
 			mXparser.consolePrintln(" --------------------");
 			mXparser.consolePrintln("| Expression tokens: |");
-			mXparser.consolePrintln(" -------------------------------------------------------------------------------------------------");
-			mXparser.consolePrintln("|    TokenIdx |       Token |        KeyW |     TokenId | TokenTypeId |  TokenLevel |  TokenValue |");
-			mXparser.consolePrintln(" -------------------------------------------------------------------------------------------------");
+			mXparser.consolePrintln(" ---------------------------------------------------------------------------------------------------------------");
+			mXparser.consolePrintln("|    TokenIdx |       Token |        KeyW |     TokenId | TokenTypeId |  TokenLevel |  TokenValue |   LooksLike |");
+			mXparser.consolePrintln(" ---------------------------------------------------------------------------------------------------------------");
+			if (tokensList == null) {
+				mXparser.consolePrintln("NULL tokens list");
+				return;
+			}
+			int tokensNumber = tokensList.Count;
 			for (int tokenIndex=0; tokenIndex < tokensNumber; tokenIndex++){
 				String tokenIndexStr = getLeftSpaces(maxStr, tokenIndex.ToString() );
 				String tokenStr = getLeftSpaces(maxStr, tokensList[tokenIndex].tokenStr );
@@ -5409,15 +7121,17 @@ namespace org.mariuszgromada.math.mxparser {
 				String tokenTypeIdStr = getLeftSpaces(maxStr, tokensList[tokenIndex].tokenTypeId.ToString() );
 				String tokenLevelStr = getLeftSpaces(maxStr, tokensList[tokenIndex].tokenLevel.ToString() );
 				String tokenValueStr = getLeftSpaces(maxStr, tokensList[tokenIndex].tokenValue.ToString() );
+				String tokenLooksLikeStr = getLeftSpaces(maxStr, tokensList[tokenIndex].looksLike);
 				mXparser.consolePrintln(	"| " + tokenIndexStr +
 									" | " + tokenStr +
 									" | " + keyWordStr +
 									" | " + tokenIdStr +
 									" | " + tokenTypeIdStr +
 									" | " + tokenLevelStr +
-									" | " + tokenValueStr + " |");
+									" | " + tokenValueStr +
+									" | " + tokenLooksLikeStr + " |");
 			}
-			mXparser.consolePrintln(" -------------------------------------------------------------------------------------------------");
+			mXparser.consolePrintln(" ---------------------------------------------------------------------------------------------------------------");
 		}
 		/**
 		 * shows initial tokens
@@ -5447,14 +7161,6 @@ namespace org.mariuszgromada.math.mxparser {
 				mXparser.consolePrint( /*"[" + this +  "]" +  */ "[" + description + "]" + "[" + expressionString + "] " + info);
 			else
 				mXparser.consolePrint(/*"[" + this +  "]" + */ info);
-		}
-		/**
-		 * Gets license info
-		 *
-		 * @return     License info as string.
-		 */
-		public String getLicense() {
-			return mXparser.LICENSE;
 		}
 		/**
 		 * Expression cloning.
