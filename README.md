@@ -2,7 +2,7 @@
 
 Simple math problem generator with some features : 
 
-* Adjustable number
+* Adjustable range of number to generate
 * Adjustable number of operation
 * Batch generate problems
 
