@@ -6,7 +6,7 @@ Simple math problem generator with some features :
 * Adjustable number of operation
 * Batch generate problems
 
-This program using mXparser library from Mariusz Gromada at mathparser.com.
+This program using mXparser library from Mariusz Gromada at mathparser.org.
 
 I'm no smart person so this shit may have (a lot of) bugs. Please contact me at [this email](mailto:robinmauritzrm@gmail.com) for any question.
 
