@@ -52,6 +52,7 @@ namespace Math_Problem_Generator_C_Sharp
             }
             else
             {
+                var stopWatch = System.Diagnostics.Stopwatch.StartNew();
                 if (!switchToCancel)
                 {
                     //ini sebelumnya kode buat ngitung
@@ -69,6 +70,8 @@ namespace Math_Problem_Generator_C_Sharp
                     }
                     generateButton.Text = "Generate";
                 }
+                stopWatch.Stop(); //hentikan menghitung waktu kalkulasi
+                var elapsedTime = stopWatch.ElapsedMilliseconds; //memasukan waktu kalkulasi ke variabel.
             }
         }
 
@@ -267,6 +270,8 @@ namespace Math_Problem_Generator_C_Sharp
                 ((quizForm)f).logBox.Text = sb2.ToString();
                 ((quizForm)f).logBox.SelectionStart = ((quizForm)f).logBox.Text.Length;
                 ((quizForm)f).logBox.ScrollToCaret();
+                //stopWatch.Stop(); //hentikan menghitung waktu kalkulasi
+                //var elapsedTime = stopWatch.ElapsedMilliseconds; //memasukan waktu kalkulasi ke variabel.
             }
         }
 

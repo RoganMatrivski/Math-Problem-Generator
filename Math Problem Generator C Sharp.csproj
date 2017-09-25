@@ -155,7 +155,6 @@
     <Compile Include="mxparser\syntaxchecker\TokenMgrError.cs" />
     <Compile Include="mxparser\Tutorial.cs" />
     <Compile Include="Program.cs" />
-    <Compile Include="var.cs" />
     <EmbeddedResource Include="About Form.resx">
       <DependentUpon>About Form.cs</DependentUpon>
     </EmbeddedResource>
