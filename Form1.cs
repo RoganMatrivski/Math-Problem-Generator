@@ -11,6 +11,7 @@ using System.IO;
 using System.Diagnostics;
 using org.mariuszgromada.math.mxparser;
 
+
 namespace Math_Problem_Generator_C_Sharp
 {
     public partial class quizForm : Form
@@ -54,6 +55,19 @@ namespace Math_Problem_Generator_C_Sharp
 
             if (reverseCheck(num1Min, num1Max)) //Ngecek jika angka minimum ama maximum ketuker atau enggak.
             {
+                int decNum = 0;
+                if (!noDecimalCheckbox.Checked)
+                {
+                    decNum = Convert.ToInt32(decimalNumbers.Value);
+                }
+                else
+                {
+                    decNum = 0;
+                }
+
+                Generator.QuestionGen(num1Min, num1Max, (Convert.ToInt32(iterationValue.Text)) - 1, Convert.ToInt32(decimalNumbers.Value), out questionProblem.Text, out resultNum.Text);
+                
+                /*
 
                 //Problem Generator
 
@@ -71,6 +85,7 @@ namespace Math_Problem_Generator_C_Sharp
                     questionString = questionString.Replace("/", " : "); //Ngeganti string yang bisa dibaca komputer ke tulisan yang bisa dibaca manusia.
                     Expression ex = new Expression(questionRandResult);
                     result = ex.calculate(); //Ngekalkulasi questionRandResult dengan MathFunction.MathParser.Calculate.
+                    Debug.WriteLine("This Value {0} is the result. This value {1} is the epsilon. This Boolean {2} should have turned on.", result, double.Epsilon, Math.Abs(result % 1) < Double.Epsilon);
 
                     if (Math.Abs(result % 1) < Double.Epsilon) //Ngecek jika result merupakan angka dengan desimal
                     {
@@ -103,6 +118,7 @@ namespace Math_Problem_Generator_C_Sharp
                         }
                     }
                 }
+                 */
             }
             else
             {

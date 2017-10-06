@@ -107,6 +107,7 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="Generator.cs" />
     <Compile Include="mxparser\Argument.cs" />
     <Compile Include="mxparser\Constant.cs" />
     <Compile Include="mxparser\Expression.cs" />
@@ -154,6 +155,7 @@
     <Compile Include="mxparser\syntaxchecker\Token.cs" />
     <Compile Include="mxparser\syntaxchecker\TokenMgrError.cs" />
     <Compile Include="mxparser\Tutorial.cs" />
+    <Compile Include="Options.cs" />
     <Compile Include="Program.cs" />
     <EmbeddedResource Include="About Form.resx">
       <DependentUpon>About Form.cs</DependentUpon>
