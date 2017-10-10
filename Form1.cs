@@ -65,7 +65,12 @@ namespace Math_Problem_Generator_C_Sharp
                     decNum = 0;
                 }
 
-                Generator.QuestionGen(num1Min, num1Max, (Convert.ToInt32(iterationValue.Text)) - 1, Convert.ToInt32(decimalNumbers.Value), out questionProblem.Text, out resultNum.Text);
+                string questionRes, resNum;
+
+                Generator.QuestionGen(num1Min, num1Max, (Convert.ToInt32(iterationValue.Text)) - 1, Convert.ToInt32(decimalNumbers.Value), out questionRes, out resNum);
+
+                questionProblem.Text = questionRes;
+                resultNum.Text = resNum;
                 
                 /*
 
