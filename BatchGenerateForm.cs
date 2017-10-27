@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using org.mariuszgromada.math.mxparser;
+using System.Threading.Tasks;
 
 namespace Math_Problem_Generator_C_Sharp
 {
@@ -28,7 +29,8 @@ namespace Math_Problem_Generator_C_Sharp
 
         System.Windows.Forms.Form f = System.Windows.Forms.Application.OpenForms["quizForm"];
         //MathFunctions.MathParser mp = new MathFunctions.MathParser();
-
+        int numOfQuestion = 0;
+        
         int retryCount = 0;
         bool decimals = true;
         System.Windows.Forms.Form batchForm = System.Windows.Forms.Application.OpenForms["BatchGenerateForm"]; 
@@ -46,12 +48,15 @@ namespace Math_Problem_Generator_C_Sharp
         {
             //Problem Generator
 
+            numOfQuestion = Convert.ToInt32(questionNumber.Value);
+
             if (string.IsNullOrWhiteSpace(browseLocation.Text))
             {
                 MessageBox.Show("Please specify the save location.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             else
             {
+                var stopWatch = System.Diagnostics.Stopwatch.StartNew();
                 if (!switchToCancel)
                 {
                     //ini sebelumnya kode buat ngitung
@@ -69,6 +74,8 @@ namespace Math_Problem_Generator_C_Sharp
                     }
                     generateButton.Text = "Generate";
                 }
+                stopWatch.Stop(); //hentikan menghitung waktu kalkulasi
+                var elapsedTime = stopWatch.ElapsedMilliseconds; //memasukan waktu kalkulasi ke variabel.
             }
         }
 
@@ -163,7 +170,8 @@ namespace Math_Problem_Generator_C_Sharp
                 {
                     Debug.WriteLine("Checking if backgroundWorker Cancelled");
 
-                    for (int i = 0; i <= questionNumber.Value; i++)
+                    //for (int i = 0; i <= questionNumber.Value; i++)
+                    Parallel.For(1, numOfQuestion, i =>
                     {
                         Debug.WriteLine("This Line has been executed on For Loop.");
                         decimals = true;
@@ -207,13 +215,13 @@ namespace Math_Problem_Generator_C_Sharp
                                     retryCount++;
                                 }
                             }
-                        }
+                        };
 
                         if (backgroundWorker1.CancellationPending)
                         {
                             backgroundWorker1.ReportProgress(0);
-                            
-                            break;
+
+                            //break;
                         }
 
                         if (i == questionNum)
@@ -222,7 +230,7 @@ namespace Math_Problem_Generator_C_Sharp
                             workIsCompleted = true;
                         }
                         backgroundWorker1.ReportProgress(i);
-                    }
+                    });
                 }
             }
             stopWatch.Stop();
@@ -267,6 +275,8 @@ namespace Math_Problem_Generator_C_Sharp
                 ((quizForm)f).logBox.Text = sb2.ToString();
                 ((quizForm)f).logBox.SelectionStart = ((quizForm)f).logBox.Text.Length;
                 ((quizForm)f).logBox.ScrollToCaret();
+                //stopWatch.Stop(); //hentikan menghitung waktu kalkulasi
+                //var elapsedTime = stopWatch.ElapsedMilliseconds; //memasukan waktu kalkulasi ke variabel.
             }
         }
 
