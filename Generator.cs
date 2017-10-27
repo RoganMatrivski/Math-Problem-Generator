@@ -35,8 +35,10 @@ public class Generator
     Random randOperator = new Random();
 
     //Generator questionGenerator = new questionGenerator();
-    public static string QuestionGen(int firstNum1, int firstNum2, int iterationValue, int decimalNumbers, out string resultQuestion, out string resultAnswer)
+    public static void QuestionGen(int firstNum1, int firstNum2, int iterationValue, int decimalNumbers, out string resultQuestion, out string resultAnswer)
     {
+        resultQuestion = "";
+        resultAnswer = "";
         int retryCount = 0; //Ngitung berapa kali ngeGenerate ulang
         bool decimals = true;
         var stopWatch = System.Diagnostics.Stopwatch.StartNew(); //Ngeinitialize sekaligus mulai ngitung waktu sampai fungsi Stopwatch dihentikan.
@@ -51,20 +53,15 @@ public class Generator
             questionString = questionString.Replace("/", " : "); //Ngeganti string yang bisa dibaca komputer ke tulisan yang bisa dibaca manusia.
             Expression ex = new Expression(questionRandResult);
             result = ex.calculate(); //Ngekalkulasi questionRandResult dengan MathFunction.MathParser.Calculate.
-            Debug.WriteLine("The number {0} is the result.", result);
-            Debug.WriteLine("The number {0} is the result and processed.", Math.Abs(result % 1));
-            Debug.WriteLine("This number {0} is the double epsilon number.", (double.Epsilon));
-            Debug.WriteLine("This => {0} should have turned on.", (Math.Floor(result) == result));
+            Debug.WriteLine("This Value {0} is the result. This value {1} is the epsilon. This Boolean {2} should have turned on.", result, double.Epsilon, Math.Abs(result % 1) < Double.Epsilon);
 
-
-            if (Math.Abs(result % 1) < double.Epsilon) //Ngecek jika result merupakan angka dengan desimal
-            //if (!decimalChecker(result))
+            if (Math.Abs(result % 1) < Double.Epsilon) //Ngecek jika result merupakan angka dengan desimal
             {
                 stopWatch.Stop(); //hentikan menghitung waktu kalkulasi
                 var elapsedTime = stopWatch.ElapsedMilliseconds; //memasukan waktu kalkulasi ke variabel.
                 Console.WriteLine("the number " + result.ToString() + " is not decimal");
                 decimals = false;
-                logAdd("Succeeded generating a random problem in " + elapsedTime + " millisecond, with each value between " + firstNum1 + " to " + firstNum2 + ", with an iteration number of " + iterationValue + ", regenerated " + retryCount + " times in attempt to search for the non-decimal result.");
+                //logAdd("Succeeded generating a random problem in " + elapsedTime + " millisecond, with each value between " + firstNum1 + " to " + firstNum2 + ", with an iteration number of " + iterationValue + ", regenerated " + retryCount + " times in attempt to search for the non-decimal result.");
                 //TODO : Ganti buat return ke function.
 
                 //questionProblem = questionString;

@@ -65,9 +65,15 @@ namespace Math_Problem_Generator_C_Sharp
                     decNum = 0;
                 }
 
+                int numOfDec = 0;
+                if (noDecimalCheckbox.Checked != true) 
+                {
+                    numOfDec = Convert.ToInt32(decimalNumbers.Value);
+                }
+
                 string questionRes, resNum;
 
-                Generator.QuestionGen(num1Min, num1Max, (Convert.ToInt32(iterationValue.Text)) - 1, Convert.ToInt32(decimalNumbers.Value), out questionRes, out resNum);
+                Generator.QuestionGen(num1Min, num1Max, (Convert.ToInt32(iterationValue.Text)), numOfDec, out questionRes, out resNum);
 
                 questionProblem.Text = questionRes;
                 resultNum.Text = resNum;
